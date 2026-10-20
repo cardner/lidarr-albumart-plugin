@@ -54,14 +54,14 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
     {
         Validate(options);
 
-        using var image = SKBitmap.Decode(sourcePath)
-                          ?? throw new ArgumentException($"Unsupported or invalid image '{sourcePath}'.", nameof(sourcePath));
+        using var image = DecodeImage(sourcePath, out var encodedOrigin);
+        var orientedSize = GetOrientedSize(image.Width, image.Height, encodedOrigin);
 
-        var originalWidth = image.Width;
-        var originalHeight = image.Height;
+        var originalWidth = orientedSize.Width;
+        var originalHeight = orientedSize.Height;
         var originalBytes = new FileInfo(sourcePath).Length;
         var destinationPath = GetDestinationPath(sourcePath, directory, options, profile);
-        var requiresResize = Math.Max(image.Width, image.Height) > options.MaxDimension;
+        var requiresResize = Math.Max(originalWidth, originalHeight) > options.MaxDimension;
         var requiresConversion = options.ConvertToJpeg &&
                                  !string.Equals(Path.GetExtension(sourcePath), ".jpg", StringComparison.OrdinalIgnoreCase) &&
                                  !string.Equals(Path.GetExtension(sourcePath), ".jpeg", StringComparison.OrdinalIgnoreCase);
@@ -83,7 +83,7 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
                 originalBytes);
         }
 
-        var outputSize = CalculateOutputSize(image.Width, image.Height, options);
+        var outputSize = CalculateOutputSize(originalWidth, originalHeight, options);
         if (options.DryRun)
         {
             return new CoverArtResult(
@@ -97,7 +97,7 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
                 originalBytes);
         }
 
-        WriteAtomically(image, outputSize, destinationPath, options.JpegQuality);
+        WriteAtomically(image, encodedOrigin, outputSize, destinationPath, options.JpegQuality);
 
         if (options.RemoveRedundantSidecars && !PathsEqual(sourcePath, destinationPath))
         {
@@ -156,7 +156,32 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
             Math.Max(1, (int)Math.Round(height * scale)));
     }
 
-    private static void WriteAtomically(SKBitmap bitmap, SKSizeI outputSize, string destinationPath, int quality)
+    private static SKSizeI GetOrientedSize(int width, int height, SKEncodedOrigin origin)
+    {
+        return origin is SKEncodedOrigin.LeftTop or
+            SKEncodedOrigin.RightTop or
+            SKEncodedOrigin.RightBottom or
+            SKEncodedOrigin.LeftBottom
+            ? new SKSizeI(height, width)
+            : new SKSizeI(width, height);
+    }
+
+    private static SKBitmap DecodeImage(string sourcePath, out SKEncodedOrigin origin)
+    {
+        using var sourceStream = File.OpenRead(sourcePath);
+        using var codec = SKCodec.Create(sourceStream)
+                          ?? throw new ArgumentException($"Unsupported or invalid image '{sourcePath}'.", nameof(sourcePath));
+        origin = codec.EncodedOrigin;
+        return SKBitmap.Decode(codec)
+               ?? throw new ArgumentException($"Could not decode image '{sourcePath}'.", nameof(sourcePath));
+    }
+
+    private static void WriteAtomically(
+        SKBitmap bitmap,
+        SKEncodedOrigin origin,
+        SKSizeI outputSize,
+        string destinationPath,
+        int quality)
     {
         var directory = Path.GetDirectoryName(destinationPath)
                         ?? throw new IOException($"Cannot determine destination directory for '{destinationPath}'.");
@@ -165,18 +190,27 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
         var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
         try
         {
+            var orientedSize = GetOrientedSize(bitmap.Width, bitmap.Height, origin);
+            using var orientedSurface = SKSurface.Create(new SKImageInfo(orientedSize.Width, orientedSize.Height))
+                                        ?? throw new IOException("Could not create the orientation surface.");
+            orientedSurface.Canvas.Clear(SKColors.Transparent);
+            ApplyOrientation(orientedSurface.Canvas, origin, bitmap.Width, bitmap.Height);
+            orientedSurface.Canvas.DrawBitmap(bitmap, 0, 0, SKSamplingOptions.Default);
+            orientedSurface.Canvas.Flush();
+            using var orientedImage = orientedSurface.Snapshot();
+
             using var surface = SKSurface.Create(new SKImageInfo(outputSize.Width, outputSize.Height))
                                 ?? throw new IOException("Could not create the image resize surface.");
-            using var paint = new SKPaint { IsAntialias = true };
-            surface.Canvas.DrawBitmap(
-                bitmap,
+            var outputFormat = GetOutputFormat(destinationPath);
+            surface.Canvas.Clear(outputFormat == SKEncodedImageFormat.Jpeg ? SKColors.White : SKColors.Transparent);
+            surface.Canvas.DrawImage(
+                orientedImage,
                 new SKRect(0, 0, outputSize.Width, outputSize.Height),
-                new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
-                paint);
+                new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
             surface.Canvas.Flush();
 
             using var outputImage = surface.Snapshot();
-            using var encoded = outputImage.Encode(GetOutputFormat(destinationPath), quality)
+            using var encoded = outputImage.Encode(outputFormat, quality)
                                 ?? throw new IOException("Could not encode the optimized image.");
             using (var stream = File.Create(temporaryPath))
             {
@@ -191,6 +225,42 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
             {
                 File.Delete(temporaryPath);
             }
+        }
+    }
+
+    private static void ApplyOrientation(SKCanvas canvas, SKEncodedOrigin origin, int width, int height)
+    {
+        switch (origin)
+        {
+            case SKEncodedOrigin.TopRight:
+                canvas.Translate(width, 0);
+                canvas.Scale(-1, 1);
+                break;
+            case SKEncodedOrigin.BottomRight:
+                canvas.Translate(width, height);
+                canvas.RotateDegrees(180);
+                break;
+            case SKEncodedOrigin.BottomLeft:
+                canvas.Translate(0, height);
+                canvas.Scale(1, -1);
+                break;
+            case SKEncodedOrigin.LeftTop:
+                canvas.RotateDegrees(90);
+                canvas.Scale(1, -1);
+                break;
+            case SKEncodedOrigin.RightTop:
+                canvas.Translate(height, 0);
+                canvas.RotateDegrees(90);
+                break;
+            case SKEncodedOrigin.RightBottom:
+                canvas.Translate(height, width);
+                canvas.RotateDegrees(90);
+                canvas.Scale(-1, 1);
+                break;
+            case SKEncodedOrigin.LeftBottom:
+                canvas.Translate(0, width);
+                canvas.RotateDegrees(-90);
+                break;
         }
     }
 

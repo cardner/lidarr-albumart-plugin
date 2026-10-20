@@ -14,7 +14,8 @@ album folders before external providers.
 ## Features
 
 - Runs automatically after a successful Lidarr album import
-- Defaults to a 1400 px long edge and JPEG quality 75
+- Defaults to a 1400 px long edge and source JPEG quality 85
+- Applies EXIF orientation and uses a white background when converting transparent artwork to JPEG
 - Preserves aspect ratio and never upscales by default
 - Converts PNG and WebP sidecars to JPEG
 - Uses an atomic temporary-file replacement
@@ -53,7 +54,7 @@ restoring that backup.
 | Setting | Default | Description |
 |---|---:|---|
 | Max dimension | 1400 px | Maximum width or height |
-| JPEG quality | 75 | Matches Navidrome's default resized-art quality |
+| JPEG quality | 85 | Preserves source quality before Navidrome creates served thumbnails |
 | Normalize artwork filenames | On | Writes Navidrome-priority `cover.jpg` or `artist.jpg` |
 | Remove redundant sidecars | On | Removes the selected source after successful normalization |
 | Convert PNG/WebP to JPEG | On | Produces a compact, broadly compatible sidecar |
@@ -74,6 +75,9 @@ CoverArtPriority = "cover.*, folder.*, front.*, embedded, external"
 ArtistArtPriority = "artist.*, album/artist.*, external"
 CoverArtQuality = 75
 ```
+
+The plugin's default JPEG quality is intentionally higher than Navidrome's default
+served-art quality to reduce visible artifacts from successive JPEG encodes.
 
 After a bulk scan, ask Navidrome to resolve existing folder artwork again:
 

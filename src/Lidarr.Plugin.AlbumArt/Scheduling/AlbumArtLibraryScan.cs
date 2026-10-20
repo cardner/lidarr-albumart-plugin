@@ -47,40 +47,67 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
         var artists = command.ArtistId is > 0
             ? [_artistService.GetArtist(command.ArtistId.Value)]
             : _artistService.GetAllArtists().Where(artist => artist.Monitored).ToList();
-        var options = ResolveOptions(command.DryRun);
-        var processed = 0;
-        var optimized = 0;
-        var failed = 0;
+        var (options, optimizeArtistImages) = ResolveConfiguration(command.DryRun);
+        var albumCounters = new ScanCounters();
+        var artistCounters = new ScanCounters();
 
         foreach (var artist in artists.Where(artist => artist is not null))
         {
             try
             {
+                if (optimizeArtistImages)
+                {
+                    artistCounters.Record(ProcessDirectory(artist.Path, options, ArtworkProfile.Artist));
+                }
+
                 var albums = _albumService.GetAlbumsByArtistMetadataId(artist.ArtistMetadataId);
                 foreach (var album in albums)
                 {
                     var trackFiles = _mediaFileService.GetFilesByAlbum(album.Id);
                     foreach (var directory in AlbumArtOptimize.FindAlbumDirectories(trackFiles.Select(file => file.Path)))
                     {
-                        var result = _processor.Process(directory, options);
-                        processed++;
-                        optimized += result.Outcome is CoverArtOutcome.Optimized or CoverArtOutcome.WouldOptimize ? 1 : 0;
-                        failed += result.Outcome == CoverArtOutcome.Failed ? 1 : 0;
+                        albumCounters.Record(ProcessDirectory(directory, options, ArtworkProfile.Album));
+                        if (optimizeArtistImages)
+                        {
+                            artistCounters.Record(ProcessDirectory(directory, options, ArtworkProfile.Artist));
+                        }
                     }
                 }
             }
             catch (Exception exception)
             {
-                failed++;
+                albumCounters.RecordFailure();
                 _logger.Warn(exception, "AlbumArt scan failed for artistId={0} artist='{1}'; continuing.", artist.Id, artist.Name);
             }
         }
 
-        command.ResultMessage = $"{processed} album folders scanned, {optimized} optimized, {failed} failed";
+        command.ResultMessage =
+            $"album folders: {albumCounters.Processed} scanned, {albumCounters.Optimized} optimized, {albumCounters.Failed} failed; " +
+            $"artist locations: {artistCounters.Processed} scanned, {artistCounters.Optimized} optimized, {artistCounters.Failed} failed";
         _logger.Info("AlbumArt library scan complete: {0}", command.ResultMessage);
     }
 
-    private CoverArtOptions ResolveOptions(bool commandDryRun)
+    private CoverArtResult ProcessDirectory(
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile)
+    {
+        try
+        {
+            return _processor.Process(directory, options, profile);
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn(
+                exception,
+                "AlbumArt scan failed for profile='{0}' directory='{1}'; continuing.",
+                profile.NormalizedFileName,
+                directory);
+            return new CoverArtResult(CoverArtOutcome.Failed, Error: exception.Message);
+        }
+    }
+
+    private (CoverArtOptions Options, bool OptimizeArtistImages) ResolveConfiguration(bool commandDryRun)
     {
         try
         {
@@ -91,7 +118,9 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
 
             if (notificationSettings is not null)
             {
-                return notificationSettings.ToOptions() with { DryRun = commandDryRun || notificationSettings.DryRun };
+                return (
+                    notificationSettings.ToOptions() with { DryRun = commandDryRun || notificationSettings.DryRun },
+                    notificationSettings.OptimizeArtistImages);
             }
         }
         catch (Exception exception)
@@ -100,6 +129,29 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
         }
 
         var settings = Settings ?? new AlbumArtSettings();
-        return settings.ToOptions() with { DryRun = commandDryRun || settings.DryRun };
+        return (
+            settings.ToOptions() with { DryRun = commandDryRun || settings.DryRun },
+            settings.OptimizeArtistImages);
+    }
+
+    private sealed class ScanCounters
+    {
+        public int Processed { get; private set; }
+
+        public int Optimized { get; private set; }
+
+        public int Failed { get; private set; }
+
+        public void Record(CoverArtResult result)
+        {
+            Processed++;
+            Optimized += result.Outcome is CoverArtOutcome.Optimized or CoverArtOutcome.WouldOptimize ? 1 : 0;
+            Failed += result.Outcome == CoverArtOutcome.Failed ? 1 : 0;
+        }
+
+        public void RecordFailure()
+        {
+            Failed++;
+        }
     }
 }

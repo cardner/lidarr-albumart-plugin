@@ -40,16 +40,38 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
                 return;
             }
 
-            var options = (Definition?.Settings as AlbumArtSettings ?? new AlbumArtSettings()).ToOptions();
-            foreach (var directory in FindAlbumDirectories(message.TrackFiles.Select(track => track.Path)))
+            var settings = Definition?.Settings as AlbumArtSettings ?? new AlbumArtSettings();
+            var options = settings.ToOptions();
+            var albumDirectories = FindAlbumDirectories(message.TrackFiles.Select(track => track.Path));
+            foreach (var directory in albumDirectories)
             {
-                LogResult(directory, _processor.Process(directory, options));
+                ProcessDirectory("album", directory, options, ArtworkProfile.Album);
+            }
+
+            if (settings.OptimizeArtistImages)
+            {
+                foreach (var directory in FindArtistDirectories(message.Artist?.Path, albumDirectories))
+                {
+                    ProcessDirectory("artist", directory, options, ArtworkProfile.Artist);
+                }
             }
         }
         catch (Exception exception)
         {
             _logger.Warn(exception, "AlbumArt import handler failed; the album import itself is unaffected.");
         }
+    }
+
+    internal static IReadOnlyList<string> FindArtistDirectories(
+        string? artistPath,
+        IEnumerable<string> albumDirectories)
+    {
+        return new[] { artistPath }
+            .Concat(albumDirectories)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .OfType<string>()
+            .Distinct(PathComparer)
+            .ToList();
     }
 
     internal static IReadOnlyList<string> FindAlbumDirectories(IEnumerable<string> trackPaths)
@@ -122,16 +144,42 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
                name.StartsWith("disk", StringComparison.OrdinalIgnoreCase);
     }
 
-    private void LogResult(string directory, CoverArtResult result)
+    private void ProcessDirectory(
+        string artworkKind,
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile)
+    {
+        try
+        {
+            LogResult(artworkKind, directory, _processor.Process(directory, options, profile));
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn(
+                exception,
+                "AlbumArt {0} processing failed: directory='{1}'; continuing.",
+                artworkKind,
+                directory);
+        }
+    }
+
+    private void LogResult(string artworkKind, string directory, CoverArtResult result)
     {
         if (result.Outcome == CoverArtOutcome.Failed)
         {
-            _logger.Warn("AlbumArt failed: directory='{0}' source='{1}' error='{2}'", directory, result.SourcePath, result.Error);
+            _logger.Warn(
+                "AlbumArt failed: kind={0} directory='{1}' source='{2}' error='{3}'",
+                artworkKind,
+                directory,
+                result.SourcePath,
+                result.Error);
             return;
         }
 
         _logger.Info(
-            "AlbumArt result: outcome={0} directory='{1}' source='{2}' destination='{3}' dimensions={4}x{5}->{6}x{7} bytes={8}->{9}",
+            "AlbumArt result: kind={0} outcome={1} directory='{2}' source='{3}' destination='{4}' dimensions={5}x{6}->{7}x{8} bytes={9}->{10}",
+            artworkKind,
             result.Outcome,
             directory,
             result.SourcePath,

@@ -4,7 +4,7 @@ namespace NzbDrone.Core.Plugins.AlbumArt.Services;
 
 public interface ICoverArtProcessor
 {
-    CoverArtResult Process(string albumDirectory, CoverArtOptions options);
+    CoverArtResult Process(string directory, CoverArtOptions options, ArtworkProfile profile);
 }
 
 public sealed class CoverArtProcessor : ICoverArtProcessor
@@ -22,11 +22,12 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
         _finder = finder ?? throw new ArgumentNullException(nameof(finder));
     }
 
-    public CoverArtResult Process(string albumDirectory, CoverArtOptions options)
+    public CoverArtResult Process(string directory, CoverArtOptions options, ArtworkProfile profile)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(profile);
 
-        var sourcePath = _finder.Find(albumDirectory);
+        var sourcePath = _finder.Find(directory, profile);
         if (sourcePath is null)
         {
             return new CoverArtResult(CoverArtOutcome.NoArtwork);
@@ -34,7 +35,7 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
 
         try
         {
-            return ProcessFile(sourcePath, albumDirectory, options);
+            return ProcessFile(sourcePath, directory, options, profile);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -45,7 +46,11 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
         }
     }
 
-    private static CoverArtResult ProcessFile(string sourcePath, string albumDirectory, CoverArtOptions options)
+    private static CoverArtResult ProcessFile(
+        string sourcePath,
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile)
     {
         Validate(options);
 
@@ -55,7 +60,7 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
         var originalWidth = image.Width;
         var originalHeight = image.Height;
         var originalBytes = new FileInfo(sourcePath).Length;
-        var destinationPath = GetDestinationPath(sourcePath, albumDirectory, options);
+        var destinationPath = GetDestinationPath(sourcePath, directory, options, profile);
         var requiresResize = Math.Max(image.Width, image.Height) > options.MaxDimension;
         var requiresConversion = options.ConvertToJpeg &&
                                  !string.Equals(Path.GetExtension(sourcePath), ".jpg", StringComparison.OrdinalIgnoreCase) &&
@@ -111,11 +116,15 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
             new FileInfo(destinationPath).Length);
     }
 
-    private static string GetDestinationPath(string sourcePath, string albumDirectory, CoverArtOptions options)
+    private static string GetDestinationPath(
+        string sourcePath,
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile)
     {
-        if (options.NormalizeToCoverJpeg)
+        if (options.NormalizeToJpeg)
         {
-            return Path.Combine(albumDirectory, "cover.jpg");
+            return Path.Combine(directory, profile.NormalizedFileName);
         }
 
         if (options.ConvertToJpeg &&

@@ -2,27 +2,28 @@ namespace NzbDrone.Core.Plugins.AlbumArt.Services;
 
 public interface ICoverArtFinder
 {
-    string? Find(string albumDirectory);
+    string? Find(string directory, ArtworkProfile profile);
 }
 
 public sealed class CoverArtFinder : ICoverArtFinder
 {
-    private static readonly string[] PreferredNames = ["cover", "folder", "front"];
     private static readonly string[] PreferredExtensions = [".jpg", ".jpeg", ".png", ".webp"];
 
-    public string? Find(string albumDirectory)
+    public string? Find(string directory, ArtworkProfile profile)
     {
-        if (string.IsNullOrWhiteSpace(albumDirectory) || !Directory.Exists(albumDirectory))
+        ArgumentNullException.ThrowIfNull(profile);
+
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
         {
             return null;
         }
 
-        var candidates = Directory.EnumerateFiles(albumDirectory, "*", SearchOption.TopDirectoryOnly)
+        var candidates = Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly)
             .Where(IsSupported)
             .Select(path => new
             {
                 Path = path,
-                NameRank = Rank(PreferredNames, Path.GetFileNameWithoutExtension(path)),
+                NameRank = Rank(profile.PreferredNames, Path.GetFileNameWithoutExtension(path)),
                 ExtensionRank = Rank(PreferredExtensions, Path.GetExtension(path))
             })
             .Where(candidate => candidate.NameRank >= 0)

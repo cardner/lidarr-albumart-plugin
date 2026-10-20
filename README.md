@@ -3,10 +3,13 @@
 A Lidarr Connect plugin that prepares downloaded album artwork for
 [Navidrome](https://www.navidrome.org/). After an album import, it finds
 `cover.*`, `folder.*`, or `front.*`, resizes oversized artwork, recompresses it,
-and writes `cover.jpg`.
+and writes `cover.jpg`. It also optimizes `artist.*` sidecars in the artist
+root and album folders as `artist.jpg`.
 
 Navidrome's default `CoverArtPriority` starts with `cover.*`, so the optimized
 sidecar wins over `folder.*`, `front.*`, embedded art, and external providers.
+Its default `ArtistArtPriority` similarly checks `artist.*` in artist roots and
+album folders before external providers.
 
 ## Features
 
@@ -16,8 +19,9 @@ sidecar wins over `folder.*`, `front.*`, embedded art, and external providers.
 - Converts PNG and WebP sidecars to JPEG
 - Uses an atomic temporary-file replacement
 - Can remove the source `folder.*` or `front.*` after a successful write
+- Optimizes `artist.*` in artist roots and Navidrome's `album/artist.*` fallback
 - Includes dry-run mode
-- Provides a scheduled/manual library scan for existing albums
+- Provides a scheduled/manual library scan for existing album and artist art
 - Does not rewrite embedded artwork in audio files
 
 ## Requirements
@@ -40,7 +44,7 @@ restoring that backup.
 
 3. Select **Install**, then restart Lidarr.
 4. Open **Settings → Connect**, add **Album Art Optimizer**, and save it.
-5. To backfill existing albums, also open **Settings → Metadata**, add
+5. To backfill existing artwork, also open **Settings → Metadata**, add
    **Album Art Optimizer Scan**, and save it. The task appears in
    **System → Tasks** and defaults to a 24-hour interval.
 
@@ -50,11 +54,12 @@ restoring that backup.
 |---|---:|---|
 | Max dimension | 1400 px | Maximum width or height |
 | JPEG quality | 75 | Matches Navidrome's default resized-art quality |
-| Normalize to `cover.jpg` | On | Uses Navidrome's highest-priority filename |
-| Remove redundant sidecars | On | Removes the selected `folder.*`/`front.*` after success |
+| Normalize artwork filenames | On | Writes Navidrome-priority `cover.jpg` or `artist.jpg` |
+| Remove redundant sidecars | On | Removes the selected source after successful normalization |
 | Convert PNG/WebP to JPEG | On | Produces a compact, broadly compatible sidecar |
 | Only shrink | On | Never enlarges small artwork |
 | Scan interval | 1440 minutes | Existing-library scan frequency |
+| Optimize artist images | On | Processes `artist.*` in artist roots and album folders |
 | Dry run | Off | Logs intended changes without writing or deleting |
 
 The scheduled scan uses the first Album Art Optimizer connection's processing
@@ -66,6 +71,7 @@ The plugin is designed for Navidrome's default:
 
 ```toml
 CoverArtPriority = "cover.*, folder.*, front.*, embedded, external"
+ArtistArtPriority = "artist.*, album/artist.*, external"
 CoverArtQuality = 75
 ```
 
@@ -76,11 +82,20 @@ navidrome artwork reprocess --source folder --dry-run
 navidrome artwork reprocess --source folder
 ```
 
-For a specific album, use:
+To resolve artist images again after a backfill:
+
+```bash
+navidrome artwork reprocess --kind ar --dry-run
+navidrome artwork reprocess --kind ar
+```
+
+For a specific album or artist, use:
 
 ```bash
 navidrome artwork explain al <album-id> --live
 navidrome artwork refresh al <album-id>
+navidrome artwork explain ar <artist-id> --live
+navidrome artwork refresh ar <artist-id>
 ```
 
 The plugin does not call Navidrome directly. It only changes sidecar files in

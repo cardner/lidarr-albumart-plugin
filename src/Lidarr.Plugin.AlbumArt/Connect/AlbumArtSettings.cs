@@ -19,6 +19,7 @@ public sealed class AlbumArtSettings : IProviderConfig
         ConvertToJpeg = true;
         OnlyShrink = true;
         ScanIntervalMinutes = 1440;
+        OptimizeArtistImages = true;
     }
 
     [FieldDefinition(0, Label = "Max dimension (px)", Type = FieldType.Number, HelpText = "Maximum width or height. Defaults to 1400.")]
@@ -27,10 +28,10 @@ public sealed class AlbumArtSettings : IProviderConfig
     [FieldDefinition(1, Label = "JPEG quality", Type = FieldType.Number, HelpText = "JPEG encoding quality from 1 to 100. Navidrome defaults to 75.")]
     public int JpegQuality { get; set; }
 
-    [FieldDefinition(2, Label = "Normalize to cover.jpg", Type = FieldType.Checkbox, HelpText = "Write cover.jpg so it wins Navidrome's default CoverArtPriority.")]
+    [FieldDefinition(2, Label = "Normalize artwork filenames", Type = FieldType.Checkbox, HelpText = "Write cover.jpg or artist.jpg so artwork wins Navidrome's default priorities.")]
     public bool NormalizeToCoverJpeg { get; set; }
 
-    [FieldDefinition(3, Label = "Remove redundant sidecars", Type = FieldType.Checkbox, HelpText = "Delete the source folder/front image only after cover.jpg is written successfully.")]
+    [FieldDefinition(3, Label = "Remove redundant sidecars", Type = FieldType.Checkbox, HelpText = "Delete the selected source image only after its normalized JPEG is written successfully.")]
     public bool RemoveRedundantSidecars { get; set; }
 
     [FieldDefinition(4, Label = "Convert PNG/WebP to JPEG", Type = FieldType.Checkbox, HelpText = "Encode supported sidecars as compact JPEG artwork.")]
@@ -42,7 +43,10 @@ public sealed class AlbumArtSettings : IProviderConfig
     [FieldDefinition(6, Label = "Scan interval (minutes)", Type = FieldType.Number, HelpText = "How often to scan the existing library. Minimum 60; defaults to 1440 (24 hours).")]
     public int ScanIntervalMinutes { get; set; }
 
-    [FieldDefinition(7, Label = "Dry run", Type = FieldType.Checkbox, HelpText = "Log intended changes without writing or deleting files.")]
+    [FieldDefinition(7, Label = "Optimize artist images", Type = FieldType.Checkbox, HelpText = "Optimize artist.* sidecars in artist roots and album folders.")]
+    public bool OptimizeArtistImages { get; set; }
+
+    [FieldDefinition(8, Label = "Dry run", Type = FieldType.Checkbox, HelpText = "Log intended changes without writing or deleting files.")]
     public bool DryRun { get; set; }
 
     public CoverArtOptions ToOptions()

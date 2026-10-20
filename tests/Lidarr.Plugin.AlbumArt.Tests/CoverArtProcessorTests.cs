@@ -146,6 +146,47 @@ public sealed class CoverArtProcessorTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_directory, "artist.jpg")));
     }
 
+    [Fact]
+    public void Processor_applies_exif_orientation_before_resizing()
+    {
+        var source = CreateImage("folder.jpg", 1200, 600);
+        AddExifOrientation(source, 6);
+
+        var result = new CoverArtProcessor().Process(_directory, new CoverArtOptions(), ArtworkProfile.Album);
+
+        Assert.Equal(CoverArtOutcome.Optimized, result.Outcome);
+        using var image = SKBitmap.Decode(Path.Combine(_directory, "cover.jpg"));
+        Assert.NotNull(image);
+        Assert.Equal(600, image.Width);
+        Assert.Equal(1200, image.Height);
+    }
+
+    [Fact]
+    public void Processor_flattens_transparency_onto_white_when_writing_jpeg()
+    {
+        var source = Path.Combine(_directory, "folder.png");
+        using (var bitmap = new SKBitmap(100, 100))
+        {
+            bitmap.Erase(SKColors.Transparent);
+            using var canvas = new SKCanvas(bitmap);
+            canvas.DrawRect(new SKRect(25, 25, 75, 75), new SKPaint { Color = SKColors.Blue });
+            using var sourceImage = SKImage.FromBitmap(bitmap);
+            using var data = sourceImage.Encode(SKEncodedImageFormat.Png, 100);
+            using var stream = File.Create(source);
+            data.SaveTo(stream);
+        }
+
+        var result = new CoverArtProcessor().Process(_directory, new CoverArtOptions(), ArtworkProfile.Album);
+
+        Assert.Equal(CoverArtOutcome.Optimized, result.Outcome);
+        using var image = SKBitmap.Decode(Path.Combine(_directory, "cover.jpg"));
+        Assert.NotNull(image);
+        var background = image.GetPixel(5, 5);
+        Assert.True(background.Red > 240);
+        Assert.True(background.Green > 240);
+        Assert.True(background.Blue > 240);
+    }
+
     public void Dispose()
     {
         Directory.Delete(_directory, true);
@@ -167,5 +208,25 @@ public sealed class CoverArtProcessorTests : IDisposable
         using var stream = File.Create(path);
         data.SaveTo(stream);
         return path;
+    }
+
+    private static void AddExifOrientation(string path, ushort orientation)
+    {
+        var jpeg = File.ReadAllBytes(path);
+        var exif = new byte[]
+        {
+            0xff, 0xe1, 0x00, 0x22,
+            0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+            0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00,
+            0x01, 0x00,
+            0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00,
+            (byte)orientation, (byte)(orientation >> 8), 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00
+        };
+
+        using var stream = File.Create(path);
+        stream.Write(jpeg, 0, 2);
+        stream.Write(exif);
+        stream.Write(jpeg, 2, jpeg.Length - 2);
     }
 }

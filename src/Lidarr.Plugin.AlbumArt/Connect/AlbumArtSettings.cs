@@ -13,7 +13,7 @@ public sealed class AlbumArtSettings : IProviderConfig
     public AlbumArtSettings()
     {
         MaxDimension = 1400;
-        JpegQuality = 75;
+        JpegQuality = 85;
         NormalizeToCoverJpeg = true;
         RemoveRedundantSidecars = true;
         ConvertToJpeg = true;
@@ -25,7 +25,7 @@ public sealed class AlbumArtSettings : IProviderConfig
     [FieldDefinition(0, Label = "Max dimension (px)", Type = FieldType.Number, HelpText = "Maximum width or height. Defaults to 1400.")]
     public int MaxDimension { get; set; }
 
-    [FieldDefinition(1, Label = "JPEG quality", Type = FieldType.Number, HelpText = "JPEG encoding quality from 1 to 100. Navidrome defaults to 75.")]
+    [FieldDefinition(1, Label = "JPEG quality", Type = FieldType.Number, HelpText = "Source JPEG quality from 1 to 100. Defaults to 85 to reduce artifacts when Navidrome resizes it again.")]
     public int JpegQuality { get; set; }
 
     [FieldDefinition(2, Label = "Normalize artwork filenames", Type = FieldType.Checkbox, HelpText = "Write cover.jpg or artist.jpg so artwork wins Navidrome's default priorities.")]

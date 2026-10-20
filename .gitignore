@@ -1,0 +1,9 @@
+_plugins/
+_temp/
+local/
+bin/
+obj/
+TestResults/
+*.user
+*.suo
+.DS_Store

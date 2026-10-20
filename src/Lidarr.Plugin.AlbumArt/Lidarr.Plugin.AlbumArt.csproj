@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>NzbDrone.Core.Plugins.AlbumArt</RootNamespace>
+    <AssemblyName>Lidarr.Plugin.AlbumArt</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version Condition="'$(Version)' == ''">0.1.0</Version>
+    <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">$(Version)</AssemblyVersion>
+    <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(Version)</InformationalVersion>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <NoWarn>$(NoWarn);CS0618</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" Version="4.153.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Lidarr.Common">
+      <HintPath>../../local/lidarr-ref/Lidarr.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Lidarr.Core">
+      <HintPath>../../local/lidarr-ref/Lidarr.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="NLog">
+      <HintPath>../../local/lidarr-ref/NLog.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="FluentValidation">
+      <HintPath>../../local/lidarr-ref/FluentValidation.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

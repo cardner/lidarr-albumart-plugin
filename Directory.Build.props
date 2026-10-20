@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <TargetLatestRuntimePatch>true</TargetLatestRuntimePatch>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <LidarrRootDir>$(MSBuildThisFileDirectory)</LidarrRootDir>
+    <BaseIntermediateOutputPath>$(LidarrRootDir)_temp/obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)$(Configuration)/</IntermediateOutputPath>
+    <OutputPath>$(LidarrRootDir)_plugins/$(MSBuildProjectName)/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugSymbols>true</DebugSymbols>
+  </PropertyGroup>
+</Project>

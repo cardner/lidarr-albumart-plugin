@@ -95,7 +95,7 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
 
                     bool? artistDirectoryExclusive = rootFolderPath is null
                         ? null
-                        : IsArtistDirectoryExclusive(
+                        : IsDirectoryExclusive(
                             album.Id,
                             artist.Path,
                             trackFilesByAlbum);
@@ -190,19 +190,32 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
         }
     }
 
-    private static bool IsArtistDirectoryExclusive(
+    private static bool IsDirectoryExclusive(
         int albumId,
         string artistPath,
         IReadOnlyDictionary<int, List<TrackFile>> trackFilesByAlbum)
     {
-        var owners = trackFilesByAlbum
-            .Where(entry => entry.Value.Any(file =>
-                AlbumDirectoryResolver.AreEquivalent(
-                    Path.GetDirectoryName(file.Path),
-                    artistPath)))
-            .Select(entry => entry.Key)
+        var currentDirectories = GetTrackDirectories(trackFilesByAlbum.GetValueOrDefault(albumId));
+        if (currentDirectories.Count == 0)
+        {
+            return false;
+        }
+
+        var shared = trackFilesByAlbum
+            .Where(entry => entry.Key != albumId)
+            .SelectMany(entry => GetTrackDirectories(entry.Value))
+            .Any(directory => currentDirectories.Any(current =>
+                AlbumDirectoryResolver.AreEquivalent(directory, current)));
+        return !shared;
+    }
+
+    private static IReadOnlyList<string> GetTrackDirectories(IEnumerable<TrackFile>? files)
+    {
+        return (files ?? [])
+            .Select(file => Path.GetDirectoryName(file.Path))
+            .OfType<string>()
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
             .ToList();
-        return owners.Count == 1 && owners[0] == albumId;
     }
 
     private bool ProcessAlbum(

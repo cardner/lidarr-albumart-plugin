@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace NzbDrone.Core.Plugins.AlbumArt.Services;
 
@@ -9,7 +11,7 @@ public sealed record AlbumDirectoryResolution(
     public bool HasSafeTarget => Directories.Count > 0;
 }
 
-public static class AlbumDirectoryResolver
+public static partial class AlbumDirectoryResolver
 {
     public static AlbumDirectoryResolution Resolve(
         IEnumerable<string> trackPaths,
@@ -103,6 +105,15 @@ public static class AlbumDirectoryResolver
                    GetComparisonKey(normalizedRight));
     }
 
+    internal static bool AreEquivalentArtistFolders(string? left, string? right)
+    {
+        var leftName = GetFolderNameKey(left);
+        var rightName = GetFolderNameKey(right);
+        return leftName is not null &&
+               rightName is not null &&
+               string.Equals(leftName, rightName, StringComparison.OrdinalIgnoreCase);
+    }
+
     internal static string? GetIdentityKey(string? path)
     {
         var normalized = NormalizeDirectory(path);
@@ -133,7 +144,10 @@ public static class AlbumDirectoryResolver
                 : "same as artist";
         }
 
-        if (artistPath is not null && !IsSameOrDescendant(candidate, artistPath))
+        if (artistPath is not null &&
+            !IsSameOrDescendant(candidate, artistPath) &&
+            !IsEquivalentArtistFolder(candidate, artistPath, rootFolderPath) &&
+            !IsExclusiveCollaborationFolder(candidate, artistPath, rootFolderPath, artistDirectoryExclusive))
         {
             return "outside artist path";
         }
@@ -161,8 +175,124 @@ public static class AlbumDirectoryResolver
         }
 
         return candidateParts.Value.Segments
-            .Select((segment, index) => PathComparer.Equals(segment, pathParts.Value.Segments[index]))
+            .Select((segment, index) => AreEquivalentSegments(
+                segment,
+                pathParts.Value.Segments[index]))
             .All(matches => matches);
+    }
+
+    private static bool IsEquivalentArtistFolder(
+        string candidate,
+        string artistPath,
+        string? rootFolderPath)
+    {
+        var candidateParts = GetComparisonParts(candidate);
+        var artistParts = GetComparisonParts(artistPath);
+        if (candidateParts is null || artistParts is null)
+        {
+            return false;
+        }
+
+        if (rootFolderPath is not null &&
+            (!IsSameOrDescendant(candidate, rootFolderPath) ||
+             !IsSameOrDescendant(artistPath, rootFolderPath)))
+        {
+            return false;
+        }
+
+        if (candidateParts.Value.Segments.Count != artistParts.Value.Segments.Count)
+        {
+            return false;
+        }
+
+        return candidateParts.Value.Segments
+            .Zip(artistParts.Value.Segments, AreEquivalentSegments)
+            .All(matches => matches);
+    }
+
+    private static bool IsExclusiveCollaborationFolder(
+        string candidate,
+        string artistPath,
+        string? rootFolderPath,
+        bool? artistDirectoryExclusive)
+    {
+        var candidateParts = GetComparisonParts(candidate);
+        var artistParts = GetComparisonParts(artistPath);
+        if (candidateParts is null ||
+            artistParts is null ||
+            candidateParts.Value.Segments.Count == 0 ||
+            artistParts.Value.Segments.Count == 0)
+        {
+            return false;
+        }
+
+        if (rootFolderPath is not null)
+        {
+            if (!IsSameOrDescendant(candidate, rootFolderPath) ||
+                IsSamePath(candidate, rootFolderPath))
+            {
+                return false;
+            }
+        }
+        else if (IsFileSystemRoot(candidate) ||
+                 candidateParts.Value.Segments.Count < 2)
+        {
+            return false;
+        }
+
+        if (artistDirectoryExclusive == false &&
+            AreEquivalent(candidate, artistPath))
+        {
+            return false;
+        }
+
+        var candidateFolder = candidateParts.Value.Segments[^1];
+        var artistFolder = artistParts.Value.Segments[^1];
+        if (AreEquivalentSegments(candidateFolder, artistFolder) ||
+            FolderContainsArtistName(candidateFolder, artistFolder))
+        {
+            return true;
+        }
+
+        var parentFolder = candidateParts.Value.Segments.Count > 1
+            ? candidateParts.Value.Segments[^2]
+            : null;
+        return parentFolder is not null &&
+               (AreEquivalentSegments(parentFolder, artistFolder) ||
+                FolderContainsArtistName(parentFolder, artistFolder));
+    }
+
+    private static bool AreEquivalentSegments(string left, string right)
+    {
+        return PathComparer.Equals(left, right) ||
+               string.Equals(left, right, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(
+                   FoldFolderName(left),
+                   FoldFolderName(right),
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool FolderContainsArtistName(string folderName, string artistName)
+    {
+        var folder = FoldFolderName(folderName);
+        var artist = FoldFolderName(artistName);
+        if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(artist))
+        {
+            return false;
+        }
+
+        return folder == artist ||
+               folder.StartsWith(artist + " ", StringComparison.OrdinalIgnoreCase) ||
+               folder.Contains(" " + artist + " ", StringComparison.OrdinalIgnoreCase) ||
+               folder.EndsWith(" " + artist, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? GetFolderNameKey(string? path)
+    {
+        var parts = GetComparisonParts(path ?? string.Empty);
+        return parts is null || parts.Value.Segments.Count == 0
+            ? null
+            : FoldFolderName(parts.Value.Segments[^1]);
     }
 
     private static string? FindCommonDirectory(IReadOnlyList<string> directories)
@@ -339,6 +469,39 @@ public static class AlbumDirectoryResolver
             .ToArray();
         return new string(folded).TrimEnd(' ', '.');
     }
+
+    private static string FoldFolderName(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        foreach (var character in FoldForComparison(value).Normalize(NormalizationForm.FormD))
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            builder.Append(character switch
+            {
+                '&' or '+' or '/' or '_' => ' ',
+                _ => character
+            });
+        }
+
+        var folded = PunctuationRegex()
+            .Replace(builder.ToString(), " ");
+        folded = ArticleRegex().Replace(folded, " ");
+        folded = WhitespaceRegex().Replace(folded, " ").Trim();
+        return folded.ToLowerInvariant();
+    }
+
+    [GeneratedRegex(@"[^\p{L}\p{N}]+")]
+    private static partial Regex PunctuationRegex();
+
+    [GeneratedRegex(@"\b(the|a|an|and|featuring|feat|ft)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex ArticleRegex();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceRegex();
 
     private static StringComparer PathComparer =>
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;

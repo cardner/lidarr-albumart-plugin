@@ -114,11 +114,13 @@ still download and normalize the authenticated Discogs release image.
 Before writing, the plugin validates the destination against the artist and
 library roots. Multi-disc parents are accepted only when every track directory
 is contained by the same album parent. Path comparison normalizes Unicode
-apostrophes and hyphens and resolves existing symlinks, while writes continue
-to use the original track directory. An artist directory is accepted only when
-no other monitored album stores tracks there. Shared artist directories and
-unsafe paths such as `/Music` are reported as unresolved rather than receiving
-a shared `cover.jpg`; warnings include the rejected track directory and cause.
+apostrophes and hyphens, ignores case and leading articles, and resolves
+existing symlinks, while writes continue to use the original track directory.
+An artist directory or collaboration folder is accepted only when no other
+monitored album stores tracks there. Shared artist directories, unrelated
+artist folders, and unsafe paths such as `/Music` are reported as unresolved
+rather than receiving a shared `cover.jpg`; warnings include the rejected
+track directory and cause.
 
 If every source fails, the plugin skips the album and applies the
 `missing-album-artwork` tag to its artist. A full scan removes the tag after all

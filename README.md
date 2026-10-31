@@ -155,6 +155,7 @@ FluentValidation.dll
 TagLibSharp.dll
 Equ.dll
 System.IO.Abstractions.dll
+SixLabors.ImageSharp.dll
 ```
 
 Then run:

@@ -13,11 +13,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SkiaSharp" Version="4.153.1" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.1" />
-  </ItemGroup>
-
-  <ItemGroup>
     <Reference Include="Lidarr.Common">
       <HintPath>../../local/lidarr-ref/Lidarr.Common.dll</HintPath>
       <Private>false</Private>
@@ -36,6 +31,10 @@
     </Reference>
     <Reference Include="TagLibSharp">
       <HintPath>../../local/lidarr-ref/TagLibSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SixLabors.ImageSharp">
+      <HintPath>../../local/lidarr-ref/SixLabors.ImageSharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

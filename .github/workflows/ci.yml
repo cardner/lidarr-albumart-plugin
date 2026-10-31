@@ -35,7 +35,8 @@ jobs:
               Lidarr/FluentValidation.dll \
               Lidarr/TagLibSharp.dll \
               Lidarr/Equ.dll \
-              Lidarr/System.IO.Abstractions.dll
+              Lidarr/System.IO.Abstractions.dll \
+              Lidarr/SixLabors.ImageSharp.dll
 
       - name: Restore
         run: dotnet restore AlbumArt.sln

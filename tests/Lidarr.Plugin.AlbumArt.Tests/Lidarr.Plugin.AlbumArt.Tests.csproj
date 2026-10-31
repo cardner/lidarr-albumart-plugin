@@ -10,6 +10,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="SkiaSharp" Version="4.153.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
       <PrivateAssets>all</PrivateAssets>
@@ -39,6 +41,9 @@
     </Reference>
     <Reference Include="System.IO.Abstractions">
       <HintPath>../../local/lidarr-ref/System.IO.Abstractions.dll</HintPath>
+    </Reference>
+    <Reference Include="SixLabors.ImageSharp">
+      <HintPath>../../local/lidarr-ref/SixLabors.ImageSharp.dll</HintPath>
     </Reference>
   </ItemGroup>
 </Project>

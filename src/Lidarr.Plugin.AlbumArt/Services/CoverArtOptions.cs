@@ -14,4 +14,5 @@ public sealed record CoverArtOptions(
     bool UseCoverArtArchive = true,
     bool UseDiscogs = false,
     string DiscogsToken = "",
-    string DiscogsReleaseOverrides = "");
+    string DiscogsReleaseOverrides = "",
+    string ArtistPathMappings = "");

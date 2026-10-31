@@ -21,7 +21,7 @@ album folders before external providers.
 - Converts PNG and WebP sidecars to JPEG
 - Creates missing `cover.jpg` files from Lidarr artwork, embedded front covers, MusicBrainz Cover Art Archive, or an optional Discogs fallback
 - Tries every known MusicBrainz release and approved Cover Art Archive front-image metadata before the release group
-- Rejects unsafe album destinations such as a library root or artist root
+- Rejects shared artist/library roots while allowing an artist folder owned by one album
 - Uses an atomic temporary-file replacement
 - Can remove the source `folder.*` or `front.*` after a successful write
 - Optimizes `artist.*` in artist roots and Navidrome's `album/artist.*` fallback
@@ -113,8 +113,12 @@ still download and normalize the authenticated Discogs release image.
 
 Before writing, the plugin validates the destination against the artist and
 library roots. Multi-disc parents are accepted only when every track directory
-is contained by the same album parent. Unsafe paths such as `/Music` are
-reported as unresolved rather than receiving a shared `cover.jpg`.
+is contained by the same album parent. Path comparison normalizes Unicode
+apostrophes and hyphens and resolves existing symlinks, while writes continue
+to use the original track directory. An artist directory is accepted only when
+no other monitored album stores tracks there. Shared artist directories and
+unsafe paths such as `/Music` are reported as unresolved rather than receiving
+a shared `cover.jpg`; warnings include the rejected track directory and cause.
 
 If every source fails, the plugin skips the album and applies the
 `missing-album-artwork` tag to its artist. A full scan removes the tag after all

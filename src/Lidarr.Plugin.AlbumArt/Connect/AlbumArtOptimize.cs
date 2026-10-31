@@ -1,32 +1,47 @@
+using System.Collections.Concurrent;
 using FluentValidation.Results;
 using NLog;
 using NzbDrone.Core.MediaCover;
+using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.Music;
 using NzbDrone.Core.Notifications;
 using NzbDrone.Core.Plugins.AlbumArt.Services;
+using NzbDrone.Core.RootFolders;
 using NzbDrone.Core.Tags;
 
 namespace NzbDrone.Core.Plugins.AlbumArt.Connect;
 
 public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
 {
+    private static readonly ConcurrentDictionary<string, int> FlatArtistDirectoryOwners =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
     private readonly ICoverArtProcessor _processor;
     private readonly IAlbumArtworkResolver _resolver;
     private readonly IArtistArtworkResolver? _artistResolver;
     private readonly IMissingArtworkTagService _missingArtworkTags;
+    private readonly Lazy<IAlbumService>? _albumService;
+    private readonly Lazy<IMediaFileService>? _mediaFileService;
+    private readonly Lazy<IRootFolderService>? _rootFolderService;
     private readonly Logger _logger;
 
     public AlbumArtOptimize(
         IMapCoversToLocal mediaCoverService,
         IArtistService artistService,
         Lazy<ITagService> tagService,
+        Lazy<IAlbumService> albumService,
+        Lazy<IMediaFileService> mediaFileService,
+        Lazy<IRootFolderService> rootFolderService,
         Logger logger)
         : this(
             new CoverArtProcessor(),
             new AlbumArtworkResolver(mediaCoverService, logger),
             new ArtistArtworkResolver(mediaCoverService, logger),
             new MissingArtworkTagService(artistService, tagService),
-            logger)
+            logger,
+            albumService,
+            mediaFileService,
+            rootFolderService)
     {
     }
 
@@ -44,12 +59,18 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
         IAlbumArtworkResolver resolver,
         IArtistArtworkResolver? artistResolver,
         IMissingArtworkTagService missingArtworkTags,
-        Logger logger)
+        Logger logger,
+        Lazy<IAlbumService>? albumService = null,
+        Lazy<IMediaFileService>? mediaFileService = null,
+        Lazy<IRootFolderService>? rootFolderService = null)
     {
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _artistResolver = artistResolver;
         _missingArtworkTags = missingArtworkTags ?? throw new ArgumentNullException(nameof(missingArtworkTags));
+        _albumService = albumService;
+        _mediaFileService = mediaFileService;
+        _rootFolderService = rootFolderService;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -74,12 +95,17 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
 
             var settings = Definition?.Settings as AlbumArtSettings ?? new AlbumArtSettings();
             var options = settings.ToOptions();
+            var rootFolderPath = ResolveRootFolderPath(message.Artist);
+            var artistDirectoryExclusive = rootFolderPath is null
+                ? null
+                : IsArtistDirectoryExclusive(message);
             var directoryResolution = string.IsNullOrWhiteSpace(message.Artist?.Path)
                 ? new AlbumDirectoryResolution([], "artist path unavailable on import")
                 : AlbumDirectoryResolver.Resolve(
                     message.TrackFiles.Select(track => track.Path),
                     message.Artist.Path,
-                    message.Artist.RootFolderPath);
+                    rootFolderPath,
+                    artistDirectoryExclusive);
             var albumDirectories = directoryResolution.Directories;
             if (!directoryResolution.HasSafeTarget)
             {
@@ -102,7 +128,7 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
                 foreach (var directory in FindArtistDirectories(message.Artist?.Path, albumDirectories))
                 {
                     if (message.Artist is not null &&
-                        PathComparer.Equals(directory, message.Artist.Path) &&
+                        AlbumDirectoryResolver.AreEquivalent(directory, message.Artist.Path) &&
                         _artistResolver is not null)
                     {
                         ProcessArtistDirectory(directory, message.Artist, options);
@@ -117,6 +143,83 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
         catch (Exception exception)
         {
             _logger.Warn(exception, "AlbumArt import handler failed; the album import itself is unaffected.");
+        }
+    }
+
+    private string? ResolveRootFolderPath(Artist? artist)
+    {
+        if (artist is null || !string.IsNullOrWhiteSpace(artist.RootFolderPath))
+        {
+            return artist?.RootFolderPath;
+        }
+
+        if (_rootFolderService is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var resolved = _rootFolderService.Value.GetBestRootFolderPath(artist.Path);
+            return string.IsNullOrWhiteSpace(resolved) ? null : resolved;
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn(
+                exception,
+                "AlbumArt could not resolve the library root for import artistId={0} path='{1}'.",
+                artist.Id,
+                artist.Path);
+            return null;
+        }
+    }
+
+    private bool? IsArtistDirectoryExclusive(AlbumDownloadMessage message)
+    {
+        if (message.Artist is null ||
+            _albumService is null ||
+            _mediaFileService is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var currentAlbumUsesArtistDirectory = message.TrackFiles.Any(file =>
+                AlbumDirectoryResolver.AreEquivalent(
+                    Path.GetDirectoryName(file.Path),
+                    message.Artist.Path));
+            if (!currentAlbumUsesArtistDirectory)
+            {
+                return false;
+            }
+
+            var occupiedByAnotherAlbum = _albumService.Value
+                .GetAlbumsByArtistMetadataId(message.Artist.ArtistMetadataId)
+                .Where(album => album.Monitored && album.Id != message.Album.Id)
+                .SelectMany(album => _mediaFileService.Value.GetFilesByAlbum(album.Id))
+                .Where(file => File.Exists(file.Path))
+                .Any(file => AlbumDirectoryResolver.AreEquivalent(
+                    Path.GetDirectoryName(file.Path),
+                    message.Artist.Path));
+            if (occupiedByAnotherAlbum)
+            {
+                return false;
+            }
+
+            var key = AlbumDirectoryResolver.GetIdentityKey(message.Artist.Path);
+            return key is not null &&
+                   (FlatArtistDirectoryOwners.TryAdd(key, message.Album.Id) ||
+                    FlatArtistDirectoryOwners.TryGetValue(key, out var owner) &&
+                    owner == message.Album.Id);
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn(
+                exception,
+                "AlbumArt could not verify artist-directory ownership for albumId={0}; retaining the safe rejection.",
+                message.Album.Id);
+            return null;
         }
     }
 
@@ -246,7 +349,9 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
             .Concat(albumDirectories)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .OfType<string>()
-            .Distinct(PathComparer)
+            .DistinctBy(
+                path => AlbumDirectoryResolver.GetIdentityKey(path) ?? path,
+                PathComparer)
             .ToList();
     }
 

@@ -9,6 +9,7 @@ using NzbDrone.Core.Notifications;
 using NzbDrone.Core.Plugins.AlbumArt.Connect;
 using NzbDrone.Core.Plugins.AlbumArt.Scheduling;
 using NzbDrone.Core.Plugins.AlbumArt.Services;
+using NzbDrone.Core.RootFolders;
 using NzbDrone.Core.Tags;
 using SkiaSharp;
 using TagLib;
@@ -463,6 +464,159 @@ public sealed class AlbumArtworkResolverTests : IDisposable
     }
 
     [Fact]
+    public void Import_handler_allows_artist_directory_owned_by_one_album()
+    {
+        var artistDirectory = Path.Combine(_directory, "single-album-artist");
+        Directory.CreateDirectory(artistDirectory);
+        var trackPath = Path.Combine(artistDirectory, "track.flac");
+        IOFile.WriteAllBytes(trackPath, []);
+        var fallbackPath = CreateImage("single-album-fallback.png", 800, 800);
+        var artist = new Artist
+        {
+            Id = 14,
+            ArtistMetadataId = 15,
+            Name = "Single Album Artist",
+            Path = artistDirectory,
+            RootFolderPath = _directory
+        };
+        var album = new Album
+        {
+            Id = 16,
+            ArtistMetadataId = artist.ArtistMetadataId,
+            Title = "Only Album",
+            Monitored = true
+        };
+        var resolver = new Mock<IAlbumArtworkResolver>();
+        resolver.Setup(value => value.Resolve(
+                artistDirectory,
+                It.IsAny<AlbumArtworkLookupContext>(),
+                It.Is<CoverArtOptions>(options => !options.CreateMissingCover)))
+            .Returns((ResolvedArtwork?)null);
+        resolver.Setup(value => value.Resolve(
+                artistDirectory,
+                It.IsAny<AlbumArtworkLookupContext>(),
+                It.Is<CoverArtOptions>(options => options.CreateMissingCover)))
+            .Returns(new ResolvedArtwork(fallbackPath, ArtworkSourceKind.Lidarr));
+        var processor = new Mock<ICoverArtProcessor>();
+        processor.Setup(value => value.ProcessSource(
+                fallbackPath,
+                artistDirectory,
+                It.IsAny<CoverArtOptions>(),
+                ArtworkProfile.Album,
+                ArtworkSourceKind.Lidarr))
+            .Returns(new CoverArtResult(CoverArtOutcome.Optimized, SourceKind: ArtworkSourceKind.Lidarr));
+        processor.Setup(value => value.Process(
+                artistDirectory,
+                It.IsAny<CoverArtOptions>(),
+                ArtworkProfile.Artist))
+            .Returns(new CoverArtResult(CoverArtOutcome.NoArtwork));
+        var albumService = new Mock<IAlbumService>();
+        albumService.Setup(value => value.GetAlbumsByArtistMetadataId(artist.ArtistMetadataId))
+            .Returns([album]);
+        var mediaFiles = new Mock<IMediaFileService>();
+        var tags = new Mock<IMissingArtworkTagService>();
+        var handler = new AlbumArtOptimize(
+            processor.Object,
+            resolver.Object,
+            null,
+            tags.Object,
+            _logger,
+            new Lazy<IAlbumService>(() => albumService.Object),
+            new Lazy<IMediaFileService>(() => mediaFiles.Object));
+
+        handler.OnReleaseImport(new AlbumDownloadMessage
+        {
+            Artist = artist,
+            Album = album,
+            Release = new AlbumRelease(),
+            TrackFiles = [new TrackFile { Path = trackPath }]
+        });
+
+        processor.VerifyAll();
+        resolver.VerifyAll();
+        tags.Verify(value => value.MarkMissing(It.IsAny<Artist>()), Times.Never);
+    }
+
+    [Fact]
+    public void Import_handler_rejects_second_concurrent_claim_for_artist_directory()
+    {
+        var artistDirectory = Path.Combine(_directory, "concurrent-flat-artist");
+        Directory.CreateDirectory(artistDirectory);
+        var firstTrack = Path.Combine(artistDirectory, "first.flac");
+        var secondTrack = Path.Combine(artistDirectory, "second.flac");
+        IOFile.WriteAllBytes(firstTrack, []);
+        IOFile.WriteAllBytes(secondTrack, []);
+        var artist = new Artist
+        {
+            Id = 17,
+            ArtistMetadataId = 18,
+            Name = "Concurrent Artist",
+            Path = artistDirectory,
+            RootFolderPath = _directory
+        };
+        var firstAlbum = new Album
+        {
+            Id = 19,
+            ArtistMetadataId = artist.ArtistMetadataId,
+            Title = "First",
+            Monitored = true
+        };
+        var secondAlbum = new Album
+        {
+            Id = 20,
+            ArtistMetadataId = artist.ArtistMetadataId,
+            Title = "Second",
+            Monitored = true
+        };
+        var resolver = new Mock<IAlbumArtworkResolver>();
+        resolver.Setup(value => value.Resolve(
+                artistDirectory,
+                It.IsAny<AlbumArtworkLookupContext>(),
+                It.IsAny<CoverArtOptions>()))
+            .Returns((ResolvedArtwork?)null);
+        var processor = new Mock<ICoverArtProcessor>();
+        processor.Setup(value => value.Process(
+                artistDirectory,
+                It.IsAny<CoverArtOptions>(),
+                ArtworkProfile.Artist))
+            .Returns(new CoverArtResult(CoverArtOutcome.NoArtwork));
+        var albumService = new Mock<IAlbumService>();
+        albumService.Setup(value => value.GetAlbumsByArtistMetadataId(artist.ArtistMetadataId))
+            .Returns([firstAlbum, secondAlbum]);
+        var mediaFiles = new Mock<IMediaFileService>();
+        mediaFiles.Setup(value => value.GetFilesByAlbum(It.IsAny<int>()))
+            .Returns([]);
+        var handler = new AlbumArtOptimize(
+            processor.Object,
+            resolver.Object,
+            null,
+            new Mock<IMissingArtworkTagService>().Object,
+            _logger,
+            new Lazy<IAlbumService>(() => albumService.Object),
+            new Lazy<IMediaFileService>(() => mediaFiles.Object));
+
+        handler.OnReleaseImport(new AlbumDownloadMessage
+        {
+            Artist = artist,
+            Album = firstAlbum,
+            Release = new AlbumRelease(),
+            TrackFiles = [new TrackFile { Path = firstTrack }]
+        });
+        handler.OnReleaseImport(new AlbumDownloadMessage
+        {
+            Artist = artist,
+            Album = secondAlbum,
+            Release = new AlbumRelease(),
+            TrackFiles = [new TrackFile { Path = secondTrack }]
+        });
+
+        resolver.Verify(value => value.Resolve(
+            artistDirectory,
+            It.IsAny<AlbumArtworkLookupContext>(),
+            It.IsAny<CoverArtOptions>()), Times.Exactly(2));
+    }
+
+    [Fact]
     public void Manual_scan_processes_existing_artwork_and_reports_source_counts()
     {
         var artistDirectory = Path.Combine(_directory, "manual-scan");
@@ -477,8 +631,7 @@ public sealed class AlbumArtworkResolverTests : IDisposable
             ArtistMetadataId = 21,
             Name = "Scan Artist",
             Monitored = true,
-            Path = artistDirectory,
-            RootFolderPath = _directory
+            Path = artistDirectory
         };
         var album = new Album
         {
@@ -519,6 +672,9 @@ public sealed class AlbumArtworkResolverTests : IDisposable
         tags.Setup(value => value.All()).Returns([]);
         var notifications = new Mock<INotificationFactory>();
         notifications.Setup(value => value.All()).Returns([]);
+        var rootFolders = new Mock<IRootFolderService>();
+        rootFolders.Setup(value => value.GetBestRootFolderPath(artist.Path))
+            .Returns(_directory);
         var tagsResolved = false;
         var scan = new AlbumArtLibraryScan(
             artistService.Object,
@@ -531,6 +687,7 @@ public sealed class AlbumArtworkResolverTests : IDisposable
                 return tags.Object;
             }),
             new Lazy<INotificationFactory>(() => notifications.Object),
+            new Lazy<IRootFolderService>(() => rootFolders.Object),
             _logger);
         scan.Definition = new MetadataDefinition { Settings = new AlbumArtSettings() };
         var command = new AlbumArtScanCommand();
@@ -542,6 +699,7 @@ public sealed class AlbumArtworkResolverTests : IDisposable
         Assert.True(IOFile.Exists(Path.Combine(albumDirectory, "cover.jpg")));
         Assert.Contains("sidecar: 1", command.ResultMessage, StringComparison.Ordinal);
         Assert.Contains("0 unresolved", command.ResultMessage, StringComparison.Ordinal);
+        rootFolders.Verify(value => value.GetBestRootFolderPath(artist.Path), Times.Once);
         mediaFiles.Verify(value => value.GetFilesByAlbum(unmonitoredAlbum.Id), Times.Never);
     }
 

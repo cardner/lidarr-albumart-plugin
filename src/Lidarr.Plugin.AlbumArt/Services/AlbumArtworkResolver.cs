@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 using NLog;
 using NzbDrone.Core.MediaCover;
 using NzbDrone.Core.Music;
-using SkiaSharp;
+using SixLabors.ImageSharp;
 using TagLib;
 using IOFile = System.IO.File;
 
@@ -199,13 +199,10 @@ public sealed class AlbumArtworkResolver : IAlbumArtworkResolver
 
         try
         {
-            using var codec = SKCodec.Create(path);
-            return codec is not null && codec.Info.Width > 0 && codec.Info.Height > 0;
+            var info = Image.Identify(path);
+            return info.Width > 0 && info.Height > 0;
         }
-        catch (Exception exception) when (
-            exception is IOException or
-            UnauthorizedAccessException or
-            ArgumentException)
+        catch
         {
             return false;
         }
@@ -218,9 +215,16 @@ public sealed class AlbumArtworkResolver : IAlbumArtworkResolver
             return false;
         }
 
-        using var stream = new MemoryStream(data, false);
-        using var codec = SKCodec.Create(stream);
-        return codec is not null && codec.Info.Width > 0 && codec.Info.Height > 0;
+        try
+        {
+            using var stream = new MemoryStream(data, false);
+            var info = Image.Identify(stream);
+            return info.Width > 0 && info.Height > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
 
@@ -295,9 +299,7 @@ internal sealed class EmbeddedArtworkProvider : IEmbeddedArtworkProvider
                     }
 
                     var data = picture.Data.Data;
-                    using var stream = new MemoryStream(data, false);
-                    using var codec = SKCodec.Create(stream);
-                    if (codec is not null && codec.Info.Width > 0 && codec.Info.Height > 0)
+                    if (IsDecodable(data))
                     {
                         return data;
                     }
@@ -314,6 +316,20 @@ internal sealed class EmbeddedArtworkProvider : IEmbeddedArtworkProvider
         }
 
         return null;
+    }
+
+    private static bool IsDecodable(byte[] data)
+    {
+        try
+        {
+            using var stream = new MemoryStream(data, false);
+            var info = Image.Identify(stream);
+            return info.Width > 0 && info.Height > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
 

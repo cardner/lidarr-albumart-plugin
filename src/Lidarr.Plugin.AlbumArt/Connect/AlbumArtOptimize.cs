@@ -12,6 +12,7 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
 {
     private readonly ICoverArtProcessor _processor;
     private readonly IAlbumArtworkResolver _resolver;
+    private readonly IArtistArtworkResolver? _artistResolver;
     private readonly IMissingArtworkTagService _missingArtworkTags;
     private readonly Logger _logger;
 
@@ -23,6 +24,7 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
         : this(
             new CoverArtProcessor(),
             new AlbumArtworkResolver(mediaCoverService, logger),
+            new ArtistArtworkResolver(mediaCoverService, logger),
             new MissingArtworkTagService(artistService, tagService),
             logger)
     {
@@ -33,9 +35,20 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
         IAlbumArtworkResolver resolver,
         IMissingArtworkTagService missingArtworkTags,
         Logger logger)
+        : this(processor, resolver, null, missingArtworkTags, logger)
+    {
+    }
+
+    internal AlbumArtOptimize(
+        ICoverArtProcessor processor,
+        IAlbumArtworkResolver resolver,
+        IArtistArtworkResolver? artistResolver,
+        IMissingArtworkTagService missingArtworkTags,
+        Logger logger)
     {
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+        _artistResolver = artistResolver;
         _missingArtworkTags = missingArtworkTags ?? throw new ArgumentNullException(nameof(missingArtworkTags));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -61,8 +74,23 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
 
             var settings = Definition?.Settings as AlbumArtSettings ?? new AlbumArtSettings();
             var options = settings.ToOptions();
-            var albumDirectories = FindAlbumDirectories(message.TrackFiles.Select(track => track.Path));
-            if (ProcessAlbumDirectories(message, albumDirectories, options) &&
+            var directoryResolution = string.IsNullOrWhiteSpace(message.Artist?.Path)
+                ? new AlbumDirectoryResolution([], "artist path unavailable on import")
+                : AlbumDirectoryResolver.Resolve(
+                    message.TrackFiles.Select(track => track.Path),
+                    message.Artist.Path,
+                    message.Artist.RootFolderPath);
+            var albumDirectories = directoryResolution.Directories;
+            if (!directoryResolution.HasSafeTarget)
+            {
+                _logger.Warn(
+                    "AlbumArt import skipped albumId={0}: {1}",
+                    message.Album?.Id,
+                    directoryResolution.RejectionReason);
+            }
+
+            if (directoryResolution.HasSafeTarget &&
+                ProcessAlbumDirectories(message, albumDirectories, options) &&
                 message.Artist is not null &&
                 !options.DryRun)
             {
@@ -73,7 +101,16 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
             {
                 foreach (var directory in FindArtistDirectories(message.Artist?.Path, albumDirectories))
                 {
-                    ProcessDirectory("artist", directory, options, ArtworkProfile.Artist);
+                    if (message.Artist is not null &&
+                        PathComparer.Equals(directory, message.Artist.Path) &&
+                        _artistResolver is not null)
+                    {
+                        ProcessArtistDirectory(directory, message.Artist, options);
+                    }
+                    else
+                    {
+                        ProcessDirectory("artist", directory, options, ArtworkProfile.Artist);
+                    }
                 }
             }
         }
@@ -91,7 +128,8 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
         var context = new AlbumArtworkLookupContext(
             message.Album,
             message.Release,
-            message.TrackFiles.Select(track => track.Path).ToList());
+            message.TrackFiles.Select(track => track.Path).ToList(),
+            message.Artist?.Name);
         var foundSidecar = false;
         var failed = false;
 
@@ -148,14 +186,16 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
     private CoverArtResult ProcessResolvedArtwork(
         ResolvedArtwork artwork,
         string directory,
-        CoverArtOptions options)
+        CoverArtOptions options,
+        ArtworkProfile? profile = null)
     {
+        profile ??= ArtworkProfile.Album;
         if (options.DryRun && artwork.Path is null && artwork.Data is { Length: 0 })
         {
             return new CoverArtResult(
                 CoverArtOutcome.WouldOptimize,
                 SourcePath: artwork.Description,
-                DestinationPath: Path.Combine(directory, ArtworkProfile.Album.NormalizedFileName),
+                DestinationPath: Path.Combine(directory, profile.NormalizedFileName),
                 SourceKind: artwork.SourceKind);
         }
 
@@ -164,15 +204,38 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
                 artwork.Path,
                 directory,
                 options,
-                ArtworkProfile.Album,
+                profile,
                 artwork.SourceKind)
             : _processor.ProcessData(
                 artwork.Data ?? [],
                 artwork.Description,
                 directory,
                 options,
-                ArtworkProfile.Album,
+                profile,
                 artwork.SourceKind);
+    }
+
+    private void ProcessArtistDirectory(
+        string directory,
+        Artist artist,
+        CoverArtOptions options)
+    {
+        try
+        {
+            using var artwork = _artistResolver!.Resolve(directory, artist, options);
+            var result = artwork is null
+                ? new CoverArtResult(CoverArtOutcome.NoArtwork)
+                : ProcessResolvedArtwork(artwork, directory, options, ArtworkProfile.Artist);
+            LogResult("artist", directory, result);
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn(
+                exception,
+                "AlbumArt artist processing failed: artistId={0} directory='{1}'; continuing.",
+                artist.Id,
+                directory);
+        }
     }
 
     internal static IReadOnlyList<string> FindArtistDirectories(
@@ -185,76 +248,6 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
             .OfType<string>()
             .Distinct(PathComparer)
             .ToList();
-    }
-
-    internal static IReadOnlyList<string> FindAlbumDirectories(IEnumerable<string> trackPaths)
-    {
-        var trackDirectories = trackPaths
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(Path.GetDirectoryName)
-            .OfType<string>()
-            .Distinct(PathComparer)
-            .ToList();
-
-        if (trackDirectories.Count == 0)
-        {
-            return [];
-        }
-
-        var candidates = new List<string>();
-        var commonDirectory = FindCommonDirectory(trackDirectories);
-        if (commonDirectory is not null)
-        {
-            candidates.Add(commonDirectory);
-        }
-
-        candidates.AddRange(trackDirectories);
-
-        // A single imported disc commonly stores tracks in CD1/Disc 1 while cover.jpg
-        // lives one level up in the album directory.
-        if (trackDirectories.Count == 1 && LooksLikeDiscDirectory(trackDirectories[0]))
-        {
-            var parent = Directory.GetParent(trackDirectories[0])?.FullName;
-            if (parent is not null)
-            {
-                candidates.Insert(0, parent);
-            }
-        }
-
-        return candidates.Distinct(PathComparer).ToList();
-    }
-
-    private static string? FindCommonDirectory(IReadOnlyList<string> directories)
-    {
-        var candidate = new DirectoryInfo(directories[0]);
-        while (candidate is not null)
-        {
-            if (directories.All(directory => IsSameOrDescendant(directory, candidate.FullName)))
-            {
-                return candidate.FullName;
-            }
-
-            candidate = candidate.Parent;
-        }
-
-        return null;
-    }
-
-    private static bool IsSameOrDescendant(string path, string candidate)
-    {
-        var relative = Path.GetRelativePath(candidate, path);
-        return relative == "." ||
-               (!relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) &&
-                relative != ".." &&
-                !Path.IsPathRooted(relative));
-    }
-
-    private static bool LooksLikeDiscDirectory(string directory)
-    {
-        var name = Path.GetFileName(directory);
-        return name.StartsWith("cd", StringComparison.OrdinalIgnoreCase) ||
-               name.StartsWith("disc", StringComparison.OrdinalIgnoreCase) ||
-               name.StartsWith("disk", StringComparison.OrdinalIgnoreCase);
     }
 
     private void ProcessDirectory(

@@ -24,6 +24,8 @@ public sealed class AlbumArtSettings : IProviderConfig
         UseLidarrArtwork = true;
         ExtractEmbeddedArtwork = true;
         UseCoverArtArchive = true;
+        DiscogsToken = string.Empty;
+        DiscogsReleaseOverrides = string.Empty;
     }
 
     [FieldDefinition(0, Label = "Max dimension (px)", Type = FieldType.Number, HelpText = "Maximum width or height. Defaults to 1400.")]
@@ -47,23 +49,32 @@ public sealed class AlbumArtSettings : IProviderConfig
     [FieldDefinition(6, Label = "Scan interval (minutes)", Type = FieldType.Number, HelpText = "How often to scan the existing library. Minimum 60; defaults to 1440 (24 hours).")]
     public int ScanIntervalMinutes { get; set; }
 
-    [FieldDefinition(7, Label = "Optimize artist images", Type = FieldType.Checkbox, HelpText = "Optimize artist.* sidecars in artist roots and album folders.")]
+    [FieldDefinition(7, Label = "Optimize artist images", Type = FieldType.Checkbox, HelpText = "Optimize artist.* sidecars and backfill artist.jpg in artist roots from Lidarr metadata.")]
     public bool OptimizeArtistImages { get; set; }
 
     [FieldDefinition(8, Label = "Create missing album covers", Type = FieldType.Checkbox, HelpText = "Create cover.jpg when no supported sidecar is present.")]
     public bool CreateMissingCover { get; set; }
 
-    [FieldDefinition(9, Label = "Use Lidarr artwork", Type = FieldType.Checkbox, HelpText = "Use Lidarr's matching cached album cover before other fallback sources.")]
+    [FieldDefinition(9, Label = "Use Lidarr artwork", Type = FieldType.Checkbox, HelpText = "Use Lidarr's matching cached or remote album cover before other fallback sources.")]
     public bool UseLidarrArtwork { get; set; }
 
     [FieldDefinition(10, Label = "Extract embedded artwork", Type = FieldType.Checkbox, HelpText = "Use front-cover artwork embedded in imported audio files when Lidarr has no cover.")]
     public bool ExtractEmbeddedArtwork { get; set; }
 
-    [FieldDefinition(11, Label = "Use Cover Art Archive", Type = FieldType.Checkbox, HelpText = "Look up matching MusicBrainz release or release-group artwork when local sources are unavailable.")]
+    [FieldDefinition(11, Label = "Use Cover Art Archive", Type = FieldType.Checkbox, HelpText = "Try imported, monitored, and other known MusicBrainz releases before release-group artwork.")]
     public bool UseCoverArtArchive { get; set; }
 
     [FieldDefinition(12, Label = "Dry run", Type = FieldType.Checkbox, HelpText = "Log intended changes without writing or deleting files.")]
     public bool DryRun { get; set; }
+
+    [FieldDefinition(13, Label = "Use Discogs fallback", Type = FieldType.Checkbox, HelpText = "After local, Lidarr, embedded, and MusicBrainz sources miss, search Discogs using conservative matching.")]
+    public bool UseDiscogs { get; set; }
+
+    [FieldDefinition(14, Label = "Discogs personal access token", Type = FieldType.Password, Privacy = PrivacyLevel.ApiKey, HelpText = "Required for Discogs image access. The token is sent only to Discogs and is never logged.")]
+    public string DiscogsToken { get; set; }
+
+    [FieldDefinition(15, Label = "Discogs release overrides", Type = FieldType.Textbox, Advanced = true, HelpText = "Optional exact mappings in LidarrAlbumId=DiscogsReleaseId form, separated by lines or commas.")]
+    public string DiscogsReleaseOverrides { get; set; }
 
     public CoverArtOptions ToOptions()
     {
@@ -78,7 +89,10 @@ public sealed class AlbumArtSettings : IProviderConfig
             CreateMissingCover,
             UseLidarrArtwork,
             ExtractEmbeddedArtwork,
-            UseCoverArtArchive);
+            UseCoverArtArchive,
+            UseDiscogs,
+            DiscogsToken,
+            DiscogsReleaseOverrides);
     }
 
     public NzbDroneValidationResult Validate()
@@ -100,5 +114,9 @@ public sealed class AlbumArtSettingsValidator : AbstractValidator<AlbumArtSettin
         RuleFor(settings => settings.ScanIntervalMinutes)
             .GreaterThanOrEqualTo(60)
             .WithMessage("Scan interval must be at least 60 minutes.");
+        RuleFor(settings => settings.DiscogsToken)
+            .NotEmpty()
+            .When(settings => settings.UseDiscogs)
+            .WithMessage("A Discogs personal access token is required when Discogs fallback is enabled.");
     }
 }

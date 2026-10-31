@@ -17,6 +17,7 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
     private readonly IMediaFileService _mediaFileService;
     private readonly ICoverArtProcessor _processor;
     private readonly IAlbumArtworkResolver _resolver;
+    private readonly IArtistArtworkResolver _artistResolver;
     private readonly IMissingArtworkTagService _missingArtworkTags;
     private readonly Lazy<INotificationFactory> _notificationFactory;
     private readonly Logger _logger;
@@ -36,6 +37,7 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
         _notificationFactory = notificationFactory;
         _processor = new CoverArtProcessor();
         _resolver = new AlbumArtworkResolver(mediaCoverService, logger);
+        _artistResolver = new ArtistArtworkResolver(mediaCoverService, logger);
         _missingArtworkTags = new MissingArtworkTagService(artistService, tagService);
         _logger = logger;
     }
@@ -66,7 +68,7 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
             {
                 if (optimizeArtistImages)
                 {
-                    artistCounters.Record(ProcessDirectory(artist.Path, options, ArtworkProfile.Artist));
+                    artistCounters.Record(ProcessArtist(artist, options));
                 }
 
                 var albums = _albumService.GetAlbumsByArtistMetadataId(artist.ArtistMetadataId);
@@ -81,8 +83,31 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
                         continue;
                     }
 
-                    var directories = AlbumArtOptimize.FindAlbumDirectories(trackFiles.Select(file => file.Path));
-                    var unresolved = ProcessAlbum(album, trackFiles.Select(file => file.Path).ToList(), directories, options, albumCounters);
+                    var directoryResolution = AlbumDirectoryResolver.Resolve(
+                        trackFiles.Select(file => file.Path),
+                        artist.Path,
+                        artist.RootFolderPath);
+                    var directories = directoryResolution.Directories;
+                    if (!directoryResolution.HasSafeTarget)
+                    {
+                        albumCounters.RecordUnsafePath();
+                        albumCounters.Record(new CoverArtResult(CoverArtOutcome.NoArtwork));
+                        unresolvedAlbums.Add($"{artist.Name} — {album.Title} (unsafe path)");
+                        _logger.Warn(
+                            "AlbumArt scan rejected albumId={0} album='{1}': {2}",
+                            album.Id,
+                            album.Title,
+                            directoryResolution.RejectionReason);
+                        continue;
+                    }
+
+                    var unresolved = ProcessAlbum(
+                        album,
+                        artist.Name,
+                        trackFiles.Select(file => file.Path).ToList(),
+                        directories,
+                        options,
+                        albumCounters);
                     artistHasUnresolvedAlbums |= unresolved;
                     if (unresolved)
                     {
@@ -119,13 +144,15 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
         command.ResultMessage =
             $"album folders: {albumCounters.Processed} scanned, {albumCounters.Optimized} optimized, {albumCounters.Failed} failed, " +
             $"{unresolvedAlbums.Count} unresolved ({albumCounters.SourceSummary}); " +
-            $"artist locations: {artistCounters.Processed} scanned, {artistCounters.Optimized} optimized, {artistCounters.Failed} failed" +
+            $"unsafe paths: {albumCounters.UnsafePaths}; " +
+            $"artist locations: {artistCounters.Processed} scanned, {artistCounters.Optimized} optimized, {artistCounters.Unresolved} unresolved, {artistCounters.Failed} failed ({artistCounters.SourceSummary})" +
             (unresolvedAlbums.Count > 0 ? $"; unresolved: {unresolvedSummary}" : string.Empty);
         _logger.Info("AlbumArt library scan complete: {0}", command.ResultMessage);
     }
 
     private bool ProcessAlbum(
         Album album,
+        string artistName,
         IReadOnlyList<string> trackPaths,
         IReadOnlyList<string> directories,
         CoverArtOptions options,
@@ -139,7 +166,7 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
 
         var release = album.AlbumReleases.Value.FirstOrDefault(value => value.Monitored) ??
                       album.AlbumReleases.Value.FirstOrDefault();
-        var context = new AlbumArtworkLookupContext(album, release, trackPaths);
+        var context = new AlbumArtworkLookupContext(album, release, trackPaths, artistName);
         var foundSidecar = false;
         var failed = false;
 
@@ -227,6 +254,53 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
         }
     }
 
+    private CoverArtResult ProcessArtist(
+        Artist artist,
+        CoverArtOptions options)
+    {
+        try
+        {
+            using var artwork = _artistResolver.Resolve(artist.Path, artist, options);
+            if (artwork is null)
+            {
+                return new CoverArtResult(CoverArtOutcome.NoArtwork);
+            }
+
+            if (options.DryRun && artwork.Path is null && artwork.Data is { Length: 0 })
+            {
+                return new CoverArtResult(
+                    CoverArtOutcome.WouldOptimize,
+                    SourcePath: artwork.Description,
+                    DestinationPath: Path.Combine(artist.Path, ArtworkProfile.Artist.NormalizedFileName),
+                    SourceKind: artwork.SourceKind);
+            }
+
+            return artwork.Path is not null
+                ? _processor.ProcessSource(
+                    artwork.Path,
+                    artist.Path,
+                    options,
+                    ArtworkProfile.Artist,
+                    artwork.SourceKind)
+                : _processor.ProcessData(
+                    artwork.Data ?? [],
+                    artwork.Description,
+                    artist.Path,
+                    options,
+                    ArtworkProfile.Artist,
+                    artwork.SourceKind);
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn(
+                exception,
+                "AlbumArt artist scan failed: artistId={0} directory='{1}'; continuing.",
+                artist.Id,
+                artist.Path);
+            return new CoverArtResult(CoverArtOutcome.Failed, Error: exception.Message);
+        }
+    }
+
     private (CoverArtOptions Options, bool OptimizeArtistImages) ResolveConfiguration(bool commandDryRun)
     {
         try
@@ -262,6 +336,10 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
 
         public int Failed { get; private set; }
 
+        public int Unresolved { get; private set; }
+
+        public int UnsafePaths { get; private set; }
+
         private Dictionary<ArtworkSourceKind, int> Sources { get; } = [];
 
         public string SourceSummary =>
@@ -274,6 +352,7 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
         {
             Processed++;
             Optimized += result.Outcome is CoverArtOutcome.Optimized or CoverArtOutcome.WouldOptimize ? 1 : 0;
+            Unresolved += result.Outcome == CoverArtOutcome.NoArtwork ? 1 : 0;
             Failed += result.Outcome == CoverArtOutcome.Failed ? 1 : 0;
             if (result.SourceKind is { } source)
             {
@@ -284,6 +363,11 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
         public void RecordFailure()
         {
             Failed++;
+        }
+
+        public void RecordUnsafePath()
+        {
+            UnsafePaths++;
         }
     }
 }

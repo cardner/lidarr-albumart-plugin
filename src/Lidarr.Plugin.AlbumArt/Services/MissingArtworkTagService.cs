@@ -15,9 +15,14 @@ public sealed class MissingArtworkTagService : IMissingArtworkTagService
     public const string TagLabel = "missing-album-artwork";
 
     private readonly IArtistService _artistService;
-    private readonly ITagService _tagService;
+    private readonly Lazy<ITagService> _tagService;
 
     public MissingArtworkTagService(IArtistService artistService, ITagService tagService)
+        : this(artistService, new Lazy<ITagService>(() => tagService))
+    {
+    }
+
+    public MissingArtworkTagService(IArtistService artistService, Lazy<ITagService> tagService)
     {
         _artistService = artistService;
         _tagService = tagService;
@@ -44,7 +49,7 @@ public sealed class MissingArtworkTagService : IMissingArtworkTagService
             return;
         }
 
-        var tag = _tagService.All()
+        var tag = _tagService.Value.All()
             .FirstOrDefault(value => string.Equals(value.Label, TagLabel, StringComparison.OrdinalIgnoreCase));
         if (tag is not null && artist.Tags.Remove(tag.Id))
         {
@@ -54,8 +59,8 @@ public sealed class MissingArtworkTagService : IMissingArtworkTagService
 
     private Tag GetOrCreateTag()
     {
-        return _tagService.All()
+        return _tagService.Value.All()
                    .FirstOrDefault(value => string.Equals(value.Label, TagLabel, StringComparison.OrdinalIgnoreCase)) ??
-               _tagService.Add(new Tag { Label = TagLabel });
+               _tagService.Value.Add(new Tag { Label = TagLabel });
     }
 }

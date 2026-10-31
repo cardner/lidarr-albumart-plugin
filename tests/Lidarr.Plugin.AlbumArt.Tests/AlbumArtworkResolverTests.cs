@@ -342,6 +342,34 @@ public sealed class AlbumArtworkResolverTests : IDisposable
     }
 
     [Fact]
+    public void Missing_tag_service_defers_tag_dependency_until_it_is_used()
+    {
+        var resolved = false;
+        var tagService = new Mock<ITagService>();
+        tagService.Setup(service => service.All()).Returns([]);
+        tagService.Setup(service => service.Add(It.IsAny<LidarrTag>()))
+            .Returns((LidarrTag tag) =>
+            {
+                tag.Id = 11;
+                return tag;
+            });
+        var lazyTags = new Lazy<ITagService>(() =>
+        {
+            resolved = true;
+            return tagService.Object;
+        });
+        var service = new MissingArtworkTagService(
+            new Mock<IArtistService>().Object,
+            lazyTags);
+
+        Assert.False(resolved);
+
+        service.MarkMissing(new Artist { Id = 1, Name = "Deferred" });
+
+        Assert.True(resolved);
+    }
+
+    [Fact]
     public void Import_handler_creates_cover_from_resolved_fallback()
     {
         var albumDirectory = Path.Combine(_directory, "imported");

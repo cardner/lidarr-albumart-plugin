@@ -18,7 +18,7 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
     public AlbumArtOptimize(
         IMapCoversToLocal mediaCoverService,
         IArtistService artistService,
-        ITagService tagService,
+        Lazy<ITagService> tagService,
         Logger logger)
         : this(
             new CoverArtProcessor(),

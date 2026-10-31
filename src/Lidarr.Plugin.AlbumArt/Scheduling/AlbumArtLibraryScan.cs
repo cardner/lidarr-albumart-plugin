@@ -26,7 +26,7 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
         IAlbumService albumService,
         IMediaFileService mediaFileService,
         IMapCoversToLocal mediaCoverService,
-        ITagService tagService,
+        Lazy<ITagService> tagService,
         Lazy<INotificationFactory> notificationFactory,
         Logger logger)
     {

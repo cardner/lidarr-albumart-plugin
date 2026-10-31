@@ -467,19 +467,26 @@ public sealed class AlbumArtworkResolverTests : IDisposable
         tags.Setup(value => value.All()).Returns([]);
         var notifications = new Mock<INotificationFactory>();
         notifications.Setup(value => value.All()).Returns([]);
+        var tagsResolved = false;
         var scan = new AlbumArtLibraryScan(
             artistService.Object,
             albumService.Object,
             mediaFiles.Object,
             mediaCovers.Object,
-            tags.Object,
+            new Lazy<ITagService>(() =>
+            {
+                tagsResolved = true;
+                return tags.Object;
+            }),
             new Lazy<INotificationFactory>(() => notifications.Object),
             _logger);
         scan.Definition = new MetadataDefinition { Settings = new AlbumArtSettings() };
         var command = new AlbumArtScanCommand();
 
+        Assert.False(tagsResolved);
         scan.Execute(command);
 
+        Assert.True(tagsResolved);
         Assert.True(IOFile.Exists(Path.Combine(albumDirectory, "cover.jpg")));
         Assert.Contains("sidecar: 1", command.ResultMessage, StringComparison.Ordinal);
         Assert.Contains("0 unresolved", command.ResultMessage, StringComparison.Ordinal);

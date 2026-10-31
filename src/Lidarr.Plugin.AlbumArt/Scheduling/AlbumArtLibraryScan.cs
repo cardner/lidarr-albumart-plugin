@@ -6,6 +6,7 @@ using NzbDrone.Core.Music;
 using NzbDrone.Core.Notifications;
 using NzbDrone.Core.Plugins.AlbumArt.Connect;
 using NzbDrone.Core.Plugins.AlbumArt.Services;
+using NzbDrone.Core.RootFolders;
 using NzbDrone.Core.Tags;
 
 namespace NzbDrone.Core.Plugins.AlbumArt.Scheduling;
@@ -20,6 +21,7 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
     private readonly IArtistArtworkResolver _artistResolver;
     private readonly IMissingArtworkTagService _missingArtworkTags;
     private readonly Lazy<INotificationFactory> _notificationFactory;
+    private readonly Lazy<IRootFolderService> _rootFolderService;
     private readonly Logger _logger;
 
     public AlbumArtLibraryScan(
@@ -29,12 +31,14 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
         IMapCoversToLocal mediaCoverService,
         Lazy<ITagService> tagService,
         Lazy<INotificationFactory> notificationFactory,
+        Lazy<IRootFolderService> rootFolderService,
         Logger logger)
     {
         _artistService = artistService;
         _albumService = albumService;
         _mediaFileService = mediaFileService;
         _notificationFactory = notificationFactory;
+        _rootFolderService = rootFolderService;
         _processor = new CoverArtProcessor();
         _resolver = new AlbumArtworkResolver(mediaCoverService, logger);
         _artistResolver = new ArtistArtworkResolver(mediaCoverService, logger);
@@ -71,22 +75,35 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
                     artistCounters.Record(ProcessArtist(artist, options));
                 }
 
-                var albums = _albumService.GetAlbumsByArtistMetadataId(artist.ArtistMetadataId);
-                var artistHasUnresolvedAlbums = false;
-                foreach (var album in albums.Where(value => value.Monitored))
-                {
-                    var trackFiles = _mediaFileService.GetFilesByAlbum(album.Id)
+                var albums = _albumService.GetAlbumsByArtistMetadataId(artist.ArtistMetadataId)
+                    .Where(value => value.Monitored)
+                    .ToList();
+                var trackFilesByAlbum = albums.ToDictionary(
+                    album => album.Id,
+                    album => _mediaFileService.GetFilesByAlbum(album.Id)
                         .Where(file => File.Exists(file.Path))
-                        .ToList();
+                        .ToList());
+                var rootFolderPath = ResolveRootFolderPath(artist);
+                var artistHasUnresolvedAlbums = false;
+                foreach (var album in albums)
+                {
+                    var trackFiles = trackFilesByAlbum[album.Id];
                     if (trackFiles.Count == 0)
                     {
                         continue;
                     }
 
+                    bool? artistDirectoryExclusive = rootFolderPath is null
+                        ? null
+                        : IsArtistDirectoryExclusive(
+                            album.Id,
+                            artist.Path,
+                            trackFilesByAlbum);
                     var directoryResolution = AlbumDirectoryResolver.Resolve(
                         trackFiles.Select(file => file.Path),
                         artist.Path,
-                        artist.RootFolderPath);
+                        rootFolderPath,
+                        artistDirectoryExclusive);
                     var directories = directoryResolution.Directories;
                     if (!directoryResolution.HasSafeTarget)
                     {
@@ -148,6 +165,44 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
             $"artist locations: {artistCounters.Processed} scanned, {artistCounters.Optimized} optimized, {artistCounters.Unresolved} unresolved, {artistCounters.Failed} failed ({artistCounters.SourceSummary})" +
             (unresolvedAlbums.Count > 0 ? $"; unresolved: {unresolvedSummary}" : string.Empty);
         _logger.Info("AlbumArt library scan complete: {0}", command.ResultMessage);
+    }
+
+    private string? ResolveRootFolderPath(Artist artist)
+    {
+        if (!string.IsNullOrWhiteSpace(artist.RootFolderPath))
+        {
+            return artist.RootFolderPath;
+        }
+
+        try
+        {
+            var resolved = _rootFolderService.Value.GetBestRootFolderPath(artist.Path);
+            return string.IsNullOrWhiteSpace(resolved) ? null : resolved;
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn(
+                exception,
+                "AlbumArt could not resolve the library root for artistId={0} path='{1}'.",
+                artist.Id,
+                artist.Path);
+            return null;
+        }
+    }
+
+    private static bool IsArtistDirectoryExclusive(
+        int albumId,
+        string artistPath,
+        IReadOnlyDictionary<int, List<TrackFile>> trackFilesByAlbum)
+    {
+        var owners = trackFilesByAlbum
+            .Where(entry => entry.Value.Any(file =>
+                AlbumDirectoryResolver.AreEquivalent(
+                    Path.GetDirectoryName(file.Path),
+                    artistPath)))
+            .Select(entry => entry.Key)
+            .ToList();
+        return owners.Count == 1 && owners[0] == albumId;
     }
 
     private bool ProcessAlbum(

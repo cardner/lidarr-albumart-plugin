@@ -59,6 +59,95 @@ public sealed class ArtworkLookupExpansionTests : IDisposable
         Assert.Equal(album, Assert.Single(result.Directories));
     }
 
+    [Theory]
+    [InlineData("Arm's Length", "Arm’s Length")]
+    [InlineData("Anti-Flag", "Anti‐Flag")]
+    [InlineData("Andrew W.K.", "Andrew W.K")]
+    public void Directory_resolver_matches_equivalent_artist_path_spelling(
+        string lidarrArtistName,
+        string diskArtistName)
+    {
+        var root = Path.Combine(_directory, "Music");
+        var artistPath = Path.Combine(root, lidarrArtistName);
+        var albumPath = Path.Combine(root, diskArtistName, "Album");
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(albumPath, "01.flac")],
+            artistPath,
+            root);
+
+        Assert.True(result.HasSafeTarget, result.RejectionReason);
+        Assert.Equal(albumPath, Assert.Single(result.Directories));
+    }
+
+    [Fact]
+    public void Directory_resolver_compares_symlinked_and_real_paths()
+    {
+        var realRoot = Path.Combine(_directory, "real-music");
+        var albumPath = Path.Combine(realRoot, "Artist", "Album");
+        var linkedRoot = Path.Combine(_directory, "linked-music");
+        Directory.CreateDirectory(albumPath);
+        Directory.CreateSymbolicLink(linkedRoot, realRoot);
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(albumPath, "01.flac")],
+            Path.Combine(linkedRoot, "Artist"),
+            linkedRoot);
+
+        Assert.True(result.HasSafeTarget, result.RejectionReason);
+        Assert.Equal(albumPath, Assert.Single(result.Directories));
+    }
+
+    [Fact]
+    public void Directory_resolver_allows_unshared_artist_directory()
+    {
+        var root = Path.Combine(_directory, "Music");
+        var artist = Path.Combine(root, "Single Album Artist");
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(artist, "01.flac")],
+            artist,
+            root,
+            artistDirectoryExclusive: true);
+
+        Assert.True(result.HasSafeTarget);
+        Assert.Equal(artist, Assert.Single(result.Directories));
+    }
+
+    [Fact]
+    public void Directory_resolver_rejects_shared_artist_directory_with_detail()
+    {
+        var root = Path.Combine(_directory, "Music");
+        var artist = Path.Combine(root, "Shared Artist");
+        var trackPath = Path.Combine(artist, "01.flac");
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [trackPath],
+            artist,
+            root,
+            artistDirectoryExclusive: false);
+
+        Assert.False(result.HasSafeTarget);
+        Assert.Contains(artist, result.RejectionReason, StringComparison.Ordinal);
+        Assert.Contains("shared by multiple albums", result.RejectionReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Directory_resolver_reports_library_root_rejection()
+    {
+        var root = Path.Combine(_directory, "Music");
+        var artist = Path.Combine(root, "Artist");
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(root, "01.flac")],
+            artist,
+            root);
+
+        Assert.False(result.HasSafeTarget);
+        Assert.Contains($"track directory='{root}'", result.RejectionReason, StringComparison.Ordinal);
+        Assert.Contains("library root", result.RejectionReason, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Cover_art_archive_orders_imported_monitored_then_other_releases()
     {

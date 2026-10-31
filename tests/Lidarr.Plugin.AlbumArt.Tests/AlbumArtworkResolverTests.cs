@@ -372,7 +372,8 @@ public sealed class AlbumArtworkResolverTests : IDisposable
     [Fact]
     public void Import_handler_creates_cover_from_resolved_fallback()
     {
-        var albumDirectory = Path.Combine(_directory, "imported");
+        var artistDirectory = Path.Combine(_directory, "import-artist");
+        var albumDirectory = Path.Combine(artistDirectory, "imported");
         Directory.CreateDirectory(albumDirectory);
         var trackPath = Path.Combine(albumDirectory, "track.flac");
         IOFile.WriteAllBytes(trackPath, []);
@@ -398,7 +399,13 @@ public sealed class AlbumArtworkResolverTests : IDisposable
             .Returns(new CoverArtResult(CoverArtOutcome.Optimized, SourceKind: ArtworkSourceKind.Lidarr));
         var tags = new Mock<IMissingArtworkTagService>();
         var handler = new AlbumArtOptimize(processor.Object, resolver.Object, tags.Object, _logger);
-        var artist = new Artist { Id = 9, Name = "Import Artist" };
+        var artist = new Artist
+        {
+            Id = 9,
+            Name = "Import Artist",
+            Path = artistDirectory,
+            RootFolderPath = _directory
+        };
 
         handler.OnReleaseImport(new AlbumDownloadMessage
         {
@@ -413,20 +420,65 @@ public sealed class AlbumArtworkResolverTests : IDisposable
     }
 
     [Fact]
+    public void Import_handler_does_not_mark_missing_when_album_target_is_unsafe()
+    {
+        var artistDirectory = Path.Combine(_directory, "flat-artist");
+        Directory.CreateDirectory(artistDirectory);
+        var trackPath = Path.Combine(artistDirectory, "track.flac");
+        IOFile.WriteAllBytes(trackPath, []);
+        var artist = new Artist
+        {
+            Id = 12,
+            Name = "Flat Artist",
+            Path = artistDirectory,
+            RootFolderPath = _directory
+        };
+        var processor = new Mock<ICoverArtProcessor>();
+        processor.Setup(value => value.Process(
+                artistDirectory,
+                It.IsAny<CoverArtOptions>(),
+                ArtworkProfile.Artist))
+            .Returns(new CoverArtResult(CoverArtOutcome.NoArtwork));
+        var resolver = new Mock<IAlbumArtworkResolver>();
+        var tags = new Mock<IMissingArtworkTagService>();
+        var handler = new AlbumArtOptimize(
+            processor.Object,
+            resolver.Object,
+            tags.Object,
+            _logger);
+
+        handler.OnReleaseImport(new AlbumDownloadMessage
+        {
+            Artist = artist,
+            Album = new Album { Id = 13, Title = "Flat Album" },
+            Release = new AlbumRelease(),
+            TrackFiles = [new TrackFile { Path = trackPath }]
+        });
+
+        resolver.Verify(value => value.Resolve(
+            It.IsAny<string>(),
+            It.IsAny<AlbumArtworkLookupContext>(),
+            It.IsAny<CoverArtOptions>()), Times.Never);
+        tags.Verify(value => value.MarkMissing(It.IsAny<Artist>()), Times.Never);
+    }
+
+    [Fact]
     public void Manual_scan_processes_existing_artwork_and_reports_source_counts()
     {
-        var albumDirectory = Path.Combine(_directory, "manual-scan");
+        var artistDirectory = Path.Combine(_directory, "manual-scan");
+        var albumDirectory = Path.Combine(artistDirectory, "album");
         Directory.CreateDirectory(albumDirectory);
         var trackPath = Path.Combine(albumDirectory, "track.flac");
         IOFile.WriteAllBytes(trackPath, []);
-        CreateImage(Path.Combine("manual-scan", "folder.png"), 1800, 900);
+        CreateImage(Path.Combine("manual-scan", "album", "folder.png"), 1800, 900);
         var artist = new Artist
         {
             Id = 20,
             ArtistMetadataId = 21,
             Name = "Scan Artist",
             Monitored = true,
-            Path = albumDirectory
+            Path = artistDirectory,
+            RootFolderPath = _directory
         };
         var album = new Album
         {

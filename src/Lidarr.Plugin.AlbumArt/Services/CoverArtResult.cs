@@ -14,7 +14,9 @@ public enum ArtworkSourceKind
     Sidecar,
     Lidarr,
     Embedded,
-    CoverArtArchive
+    CoverArtArchive,
+    Discogs,
+    ArtistLidarr
 }
 
 public sealed record CoverArtResult(

@@ -11,4 +11,7 @@ public sealed record CoverArtOptions(
     bool CreateMissingCover = true,
     bool UseLidarrArtwork = true,
     bool ExtractEmbeddedArtwork = true,
-    bool UseCoverArtArchive = true);
+    bool UseCoverArtArchive = true,
+    bool UseDiscogs = false,
+    string DiscogsToken = "",
+    string DiscogsReleaseOverrides = "");

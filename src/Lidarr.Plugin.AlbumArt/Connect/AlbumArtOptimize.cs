@@ -185,11 +185,12 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
 
         try
         {
-            var currentAlbumUsesArtistDirectory = message.TrackFiles.Any(file =>
-                AlbumDirectoryResolver.AreEquivalent(
-                    Path.GetDirectoryName(file.Path),
-                    message.Artist.Path));
-            if (!currentAlbumUsesArtistDirectory)
+            var currentDirectories = message.TrackFiles
+                .Select(file => Path.GetDirectoryName(file.Path))
+                .OfType<string>()
+                .Distinct()
+                .ToList();
+            if (currentDirectories.Count == 0)
             {
                 return false;
             }
@@ -199,19 +200,32 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
                 .Where(album => album.Monitored && album.Id != message.Album.Id)
                 .SelectMany(album => _mediaFileService.Value.GetFilesByAlbum(album.Id))
                 .Where(file => File.Exists(file.Path))
-                .Any(file => AlbumDirectoryResolver.AreEquivalent(
-                    Path.GetDirectoryName(file.Path),
-                    message.Artist.Path));
+                .Any(file => currentDirectories.Any(directory =>
+                    AlbumDirectoryResolver.AreEquivalent(
+                        Path.GetDirectoryName(file.Path),
+                        directory)));
             if (occupiedByAnotherAlbum)
             {
                 return false;
             }
 
-            var key = AlbumDirectoryResolver.GetIdentityKey(message.Artist.Path);
-            return key is not null &&
-                   (FlatArtistDirectoryOwners.TryAdd(key, message.Album.Id) ||
-                    FlatArtistDirectoryOwners.TryGetValue(key, out var owner) &&
-                    owner == message.Album.Id);
+            foreach (var directory in currentDirectories)
+            {
+                var key = AlbumDirectoryResolver.GetIdentityKey(directory);
+                if (key is null)
+                {
+                    return false;
+                }
+
+                if (!FlatArtistDirectoryOwners.TryAdd(key, message.Album.Id) &&
+                    !(FlatArtistDirectoryOwners.TryGetValue(key, out var owner) &&
+                      owner == message.Album.Id))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
         catch (Exception exception)
         {

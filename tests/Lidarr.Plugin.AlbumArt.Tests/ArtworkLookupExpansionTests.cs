@@ -132,6 +132,108 @@ public sealed class ArtworkLookupExpansionTests : IDisposable
         Assert.Contains("shared by multiple albums", result.RejectionReason, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("CAKE", "Cake", "Fashion Nugget")]
+    [InlineData("Cage the Elephant", "Cage The Elephant", "Social Cues")]
+    [InlineData("Built to Spill", "Built To Spill", "There Is No Enemy")]
+    [InlineData("The Bouncing Souls", "Bouncing Souls", "Simplicity (2016)")]
+    [InlineData("blink‐182", "Blink-182", "Dude Ranch")]
+    [InlineData("Andrew W.K", "Andrew W.K_", "I Get Wet")]
+    [InlineData("Bad Cop+Bad Cop", "Bad Cop-Bad Cop", "The Ride")]
+    [InlineData("Bobby “Blue” Bland", "Bobby _Blue_ Bland", "First Class Blues")]
+    public void Directory_resolver_matches_equivalent_artist_folders(
+        string lidarrArtistName,
+        string diskArtistName,
+        string albumName)
+    {
+        var root = Path.Combine(_directory, "Music");
+        var albumPath = Path.Combine(root, diskArtistName, albumName);
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(albumPath, "01.flac")],
+            Path.Combine(root, lidarrArtistName),
+            root);
+
+        Assert.True(result.HasSafeTarget, result.RejectionReason);
+        Assert.Equal(albumPath, Assert.Single(result.Directories));
+    }
+
+    [Theory]
+    [InlineData("Cécile McLorin Salvant", "Cecile McLorin Salvant", "With Every Breath I Take")]
+    [InlineData("Anberlin", "Anberlin & Matty Mullins", "Nevertake")]
+    [InlineData("Ahmad Jamal", "Ahmad Jamal featuring Yusef Lateef", "Live at the Olympia - June 27, 2012")]
+    [InlineData("Billy Bragg", "Billy Bragg & Wilco", "Mermaid Avenue")]
+    [InlineData("Born Without Bones", "Bone Without Bones", "Born Without Bones - Baby")]
+    public void Directory_resolver_allows_exclusive_collaboration_folders(
+        string lidarrArtistName,
+        string diskArtistName,
+        string albumName)
+    {
+        var root = Path.Combine(_directory, "Music");
+        var albumPath = Path.Combine(root, diskArtistName, albumName);
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(albumPath, "01.flac")],
+            Path.Combine(root, lidarrArtistName),
+            root,
+            artistDirectoryExclusive: true);
+
+        Assert.True(result.HasSafeTarget, result.RejectionReason);
+        Assert.Equal(albumPath, Assert.Single(result.Directories));
+    }
+
+    [Fact]
+    public void Directory_resolver_allows_nested_collaboration_folder()
+    {
+        var root = Path.Combine(_directory, "Music");
+        var albumPath = Path.Combine(
+            root,
+            "Cannonball Adderley",
+            "The Cannonball Adderley Quintet",
+            "Plus");
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(albumPath, "01.flac")],
+            Path.Combine(root, "The Cannonball Adderley Quintet"),
+            root,
+            artistDirectoryExclusive: true);
+
+        Assert.True(result.HasSafeTarget, result.RejectionReason);
+        Assert.Equal(albumPath, Assert.Single(result.Directories));
+    }
+
+    [Fact]
+    public void Directory_resolver_allows_collaboration_folder_when_other_albums_exist()
+    {
+        var root = Path.Combine(_directory, "Music");
+        var albumPath = Path.Combine(root, "Cecile McLorin Salvant", "With Every Breath I Take");
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(albumPath, "01.flac")],
+            Path.Combine(root, "Cécile McLorin Salvant"),
+            root,
+            artistDirectoryExclusive: false);
+
+        Assert.True(result.HasSafeTarget, result.RejectionReason);
+        Assert.Equal(albumPath, Assert.Single(result.Directories));
+    }
+
+    [Fact]
+    public void Directory_resolver_rejects_unrelated_exclusive_folder()
+    {
+        var root = Path.Combine(_directory, "Music");
+        var albumPath = Path.Combine(root, "Big D and the Kids Table", "Beijing to Boston");
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(albumPath, "01.flac")],
+            Path.Combine(root, "Brain Failure"),
+            root,
+            artistDirectoryExclusive: true);
+
+        Assert.False(result.HasSafeTarget);
+        Assert.Contains("outside artist path", result.RejectionReason, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Directory_resolver_reports_library_root_rejection()
     {

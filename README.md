@@ -72,6 +72,7 @@ restoring that backup.
 | Use Discogs fallback | Off | Searches authenticated Discogs only after all exact/local sources miss |
 | Discogs personal access token | Empty | Secret token generated in Discogs developer settings; required when Discogs is enabled |
 | Discogs release overrides | Empty | Optional `LidarrAlbumId=DiscogsReleaseId` mappings, one per line or comma-separated |
+| Artist path mappings | Empty | Advanced one-per-line `LidarrArtistName=FolderName` or `LidarrArtistName=/absolute/path` mappings |
 | Dry run | Off | Logs intended changes without writing or deleting |
 
 The scheduled scan uses the first Album Art Optimizer connection's processing
@@ -116,11 +117,26 @@ library roots. Multi-disc parents are accepted only when every track directory
 is contained by the same album parent. Path comparison normalizes Unicode
 apostrophes and hyphens, ignores case and leading articles, and resolves
 existing symlinks, while writes continue to use the original track directory.
+Lidarr's artist name, sort name, and loaded aliases are also accepted, so an
+alias such as `Hiromi` can match an artist stored by another script name.
 An artist directory or collaboration folder is accepted only when no other
 monitored album stores tracks there. Shared artist directories, unrelated
 artist folders, and unsafe paths such as `/Music` are reported as unresolved
 rather than receiving a shared `cover.jpg`; warnings include the rejected
 track directory and cause.
+
+For intentional names that Lidarr does not expose as aliases, add explicit
+advanced mappings one per line, for example:
+
+```text
+CHEWIE=Chewing on Tinfoil
+Christie Front Drive=/Music/Christine Front Drive
+MF DOOM=DOOM
+```
+
+Relative destinations are resolved beneath the library root. Absolute and
+relative destinations outside that root, the root itself, and shared album
+directories remain rejected.
 
 If every source fails, the plugin skips the album and applies the
 `missing-album-artwork` tag to its artist. A full scan removes the tag after all

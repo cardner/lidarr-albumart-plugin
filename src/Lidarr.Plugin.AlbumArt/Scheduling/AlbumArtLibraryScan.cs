@@ -84,6 +84,13 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
                         .Where(file => File.Exists(file.Path))
                         .ToList());
                 var rootFolderPath = ResolveRootFolderPath(artist);
+                var artistNames = ArtistIdentityResolver.GetNames(artist);
+                var effectiveArtistPath =
+                    ArtistPathMappingResolver.Resolve(
+                        artistNames,
+                        rootFolderPath,
+                        options.ArtistPathMappings) ??
+                    artist.Path;
                 var artistHasUnresolvedAlbums = false;
                 foreach (var album in albums)
                 {
@@ -97,13 +104,14 @@ public sealed class AlbumArtLibraryScan : ScheduledTaskBase<AlbumArtSettings>, I
                         ? null
                         : IsDirectoryExclusive(
                             album.Id,
-                            artist.Path,
+                            effectiveArtistPath,
                             trackFilesByAlbum);
                     var directoryResolution = AlbumDirectoryResolver.Resolve(
                         trackFiles.Select(file => file.Path),
-                        artist.Path,
+                        effectiveArtistPath,
                         rootFolderPath,
-                        artistDirectoryExclusive);
+                        artistDirectoryExclusive,
+                        artistNames);
                     var directories = directoryResolution.Directories;
                     if (!directoryResolution.HasSafeTarget)
                     {

@@ -17,7 +17,8 @@ public static partial class AlbumDirectoryResolver
         IEnumerable<string> trackPaths,
         string? artistPath = null,
         string? rootFolderPath = null,
-        bool? artistDirectoryExclusive = null)
+        bool? artistDirectoryExclusive = null,
+        IReadOnlyList<string>? artistNames = null)
     {
         ArgumentNullException.ThrowIfNull(trackPaths);
 
@@ -35,14 +36,9 @@ public static partial class AlbumDirectoryResolver
             return new AlbumDirectoryResolution([], "no track directories");
         }
 
-        var candidates = new List<string>();
-        var commonDirectory = FindCommonDirectory(trackDirectories);
-        if (commonDirectory is not null)
-        {
-            candidates.Add(commonDirectory);
-        }
-
-        candidates.AddRange(trackDirectories);
+        // Report the actual on-disk track folder before considering an
+        // ancestor such as the library root.
+        var candidates = new List<string>(trackDirectories);
 
         // A single imported disc commonly stores tracks in CD1/Disc 1 while
         // album artwork belongs in the parent album directory.
@@ -51,8 +47,14 @@ public static partial class AlbumDirectoryResolver
             var parent = Directory.GetParent(trackDirectories[0])?.FullName;
             if (parent is not null)
             {
-                candidates.Insert(0, parent);
+                candidates.Add(parent);
             }
+        }
+
+        var commonDirectory = FindCommonDirectory(trackDirectories);
+        if (commonDirectory is not null)
+        {
+            candidates.Add(commonDirectory);
         }
 
         var safeCandidates = new List<string>();
@@ -67,7 +69,8 @@ public static partial class AlbumDirectoryResolver
                 trackDirectories,
                 normalizedArtistPath,
                 normalizedRootPath,
-                artistDirectoryExclusive);
+                artistDirectoryExclusive,
+                artistNames);
             if (rejection is null)
             {
                 safeCandidates.Add(candidate);
@@ -114,6 +117,16 @@ public static partial class AlbumDirectoryResolver
                string.Equals(leftName, rightName, StringComparison.OrdinalIgnoreCase);
     }
 
+    internal static bool AreEquivalentArtistNames(string? left, string? right)
+    {
+        return !string.IsNullOrWhiteSpace(left) &&
+               !string.IsNullOrWhiteSpace(right) &&
+               string.Equals(
+                   FoldFolderName(left),
+                   FoldFolderName(right),
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
     internal static string? GetIdentityKey(string? path)
     {
         var normalized = NormalizeDirectory(path);
@@ -125,7 +138,8 @@ public static partial class AlbumDirectoryResolver
         IReadOnlyList<string> trackDirectories,
         string? artistPath,
         string? rootFolderPath,
-        bool? artistDirectoryExclusive)
+        bool? artistDirectoryExclusive,
+        IReadOnlyList<string>? artistNames)
     {
         if (IsFileSystemRoot(candidate))
         {
@@ -147,7 +161,12 @@ public static partial class AlbumDirectoryResolver
         if (artistPath is not null &&
             !IsSameOrDescendant(candidate, artistPath) &&
             !IsEquivalentArtistFolder(candidate, artistPath, rootFolderPath) &&
-            !IsExclusiveCollaborationFolder(candidate, artistPath, rootFolderPath, artistDirectoryExclusive))
+            !IsExclusiveCollaborationFolder(
+                candidate,
+                artistPath,
+                rootFolderPath,
+                artistDirectoryExclusive,
+                artistNames))
         {
             return "outside artist path";
         }
@@ -214,7 +233,8 @@ public static partial class AlbumDirectoryResolver
         string candidate,
         string artistPath,
         string? rootFolderPath,
-        bool? artistDirectoryExclusive)
+        bool? artistDirectoryExclusive,
+        IReadOnlyList<string>? artistNames)
     {
         var candidateParts = GetComparisonParts(candidate);
         var artistParts = GetComparisonParts(artistPath);
@@ -247,9 +267,14 @@ public static partial class AlbumDirectoryResolver
         }
 
         var candidateFolder = candidateParts.Value.Segments[^1];
-        var artistFolder = artistParts.Value.Segments[^1];
-        if (AreEquivalentSegments(candidateFolder, artistFolder) ||
-            FolderContainsArtistName(candidateFolder, artistFolder))
+        var acceptedArtistNames = new[] { artistParts.Value.Segments[^1] }
+            .Concat(artistNames ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (acceptedArtistNames.Any(name =>
+                AreEquivalentSegments(candidateFolder, name) ||
+                FolderContainsArtistName(candidateFolder, name)))
         {
             return true;
         }
@@ -258,8 +283,9 @@ public static partial class AlbumDirectoryResolver
             ? candidateParts.Value.Segments[^2]
             : null;
         return parentFolder is not null &&
-               (AreEquivalentSegments(parentFolder, artistFolder) ||
-                FolderContainsArtistName(parentFolder, artistFolder));
+               acceptedArtistNames.Any(name =>
+                   AreEquivalentSegments(parentFolder, name) ||
+                   FolderContainsArtistName(parentFolder, name));
     }
 
     private static bool AreEquivalentSegments(string left, string right)

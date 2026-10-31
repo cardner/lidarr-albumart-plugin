@@ -96,16 +96,24 @@ public sealed class AlbumArtOptimize : NotificationBase<AlbumArtSettings>
             var settings = Definition?.Settings as AlbumArtSettings ?? new AlbumArtSettings();
             var options = settings.ToOptions();
             var rootFolderPath = ResolveRootFolderPath(message.Artist);
+            var artistNames = ArtistIdentityResolver.GetNames(message.Artist);
+            var effectiveArtistPath =
+                ArtistPathMappingResolver.Resolve(
+                    artistNames,
+                    rootFolderPath,
+                    options.ArtistPathMappings) ??
+                message.Artist?.Path;
             var artistDirectoryExclusive = rootFolderPath is null
                 ? null
                 : IsArtistDirectoryExclusive(message);
-            var directoryResolution = string.IsNullOrWhiteSpace(message.Artist?.Path)
+            var directoryResolution = string.IsNullOrWhiteSpace(effectiveArtistPath)
                 ? new AlbumDirectoryResolution([], "artist path unavailable on import")
                 : AlbumDirectoryResolver.Resolve(
                     message.TrackFiles.Select(track => track.Path),
-                    message.Artist.Path,
+                    effectiveArtistPath,
                     rootFolderPath,
-                    artistDirectoryExclusive);
+                    artistDirectoryExclusive,
+                    artistNames);
             var albumDirectories = directoryResolution.Directories;
             if (!directoryResolution.HasSafeTarget)
             {

@@ -118,7 +118,7 @@ public sealed class ArtworkLookupExpansionTests : IDisposable
     public void Directory_resolver_rejects_shared_artist_directory_with_detail()
     {
         var root = Path.Combine(_directory, "Music");
-        var artist = Path.Combine(root, "Shared Artist");
+        var artist = Path.Combine(root, "Cannonball Adderley");
         var trackPath = Path.Combine(artist, "01.flac");
 
         var result = AlbumDirectoryResolver.Resolve(
@@ -163,6 +163,7 @@ public sealed class ArtworkLookupExpansionTests : IDisposable
     [InlineData("Anberlin", "Anberlin & Matty Mullins", "Nevertake")]
     [InlineData("Ahmad Jamal", "Ahmad Jamal featuring Yusef Lateef", "Live at the Olympia - June 27, 2012")]
     [InlineData("Billy Bragg", "Billy Bragg & Wilco", "Mermaid Avenue")]
+    [InlineData("Chris Thile", "Chris Thile & Brad Mehldau", "Chris Thile & Brad Mehldau [Disc 1]")]
     [InlineData("Born Without Bones", "Bone Without Bones", "Born Without Bones - Baby")]
     public void Directory_resolver_allows_exclusive_collaboration_folders(
         string lidarrArtistName,
@@ -232,6 +233,113 @@ public sealed class ArtworkLookupExpansionTests : IDisposable
 
         Assert.False(result.HasSafeTarget);
         Assert.Contains("outside artist path", result.RejectionReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Directory_resolver_matches_loaded_artist_alias()
+    {
+        var root = Path.Combine(_directory, "Music");
+        var albumPath = Path.Combine(root, "Hiromi", "Spark");
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(albumPath, "01.flac")],
+            Path.Combine(root, "上原ひろみ"),
+            root,
+            artistDirectoryExclusive: false,
+            artistNames: ["上原ひろみ", "Hiromi"]);
+
+        Assert.True(result.HasSafeTarget, result.RejectionReason);
+        Assert.Equal(albumPath, Assert.Single(result.Directories));
+    }
+
+    [Fact]
+    public void Directory_resolver_reports_track_folder_before_rejected_common_root()
+    {
+        var root = Path.Combine(_directory, "Music");
+        var firstAlbumPath = Path.Combine(root, "Cecile McLorin Salvant", "Album");
+        var secondAlbumPath = Path.Combine(root, "Unrelated Artist", "Album");
+
+        var result = AlbumDirectoryResolver.Resolve(
+            [
+                Path.Combine(firstAlbumPath, "01.flac"),
+                Path.Combine(secondAlbumPath, "02.flac")
+            ],
+            Path.Combine(root, "Cécile McLorin Salvant"),
+            root);
+
+        Assert.False(result.HasSafeTarget);
+        Assert.Contains($"candidate='{firstAlbumPath}'", result.RejectionReason, StringComparison.Ordinal);
+        Assert.DoesNotContain($"candidate='{root}'", result.RejectionReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Artist_path_mapping_accepts_explicit_folder_but_not_unmapped_artist()
+    {
+        var root = Path.Combine(_directory, "Music");
+        var albumPath = Path.Combine(root, "Chewing on Tinfoil", "Inarticulate");
+        var names = new[] { "CHEWIE" };
+
+        var withoutMapping = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(albumPath, "01.flac")],
+            Path.Combine(root, "CHEWIE"),
+            root,
+            artistDirectoryExclusive: true,
+            artistNames: names);
+        var mappedPath = ArtistPathMappingResolver.Resolve(
+            names,
+            root,
+            $"CHEWIE={Path.Combine(root, "Chewing on Tinfoil")}");
+        var withMapping = AlbumDirectoryResolver.Resolve(
+            [Path.Combine(albumPath, "01.flac")],
+            mappedPath,
+            root,
+            artistDirectoryExclusive: true,
+            artistNames: names);
+
+        Assert.False(withoutMapping.HasSafeTarget);
+        Assert.Equal(Path.Combine(root, "Chewing on Tinfoil"), mappedPath);
+        Assert.True(withMapping.HasSafeTarget, withMapping.RejectionReason);
+        Assert.Equal(albumPath, Assert.Single(withMapping.Directories));
+    }
+
+    [Fact]
+    public void Artist_path_mapping_preserves_commas_and_rejects_unsafe_destinations()
+    {
+        var root = Path.Combine(_directory, "Music");
+        const string longFolder =
+            "Waylon Jennings, Willie Nelson, Kris Kristofferson & Johnny Cash";
+        var mappings = string.Join(
+            Environment.NewLine,
+            $"The Highwaymen={longFolder}",
+            $"Root={root}",
+            $"Escape={Path.Combine(_directory, "Outside")}");
+
+        Assert.Equal(
+            Path.Combine(root, longFolder),
+            ArtistPathMappingResolver.Resolve(["The Highwaymen"], root, mappings));
+        Assert.Null(ArtistPathMappingResolver.Resolve(["Root"], root, mappings));
+        Assert.Null(ArtistPathMappingResolver.Resolve(["Escape"], root, mappings));
+    }
+
+    [Fact]
+    public void Artist_identity_includes_name_sort_name_and_loaded_aliases()
+    {
+        var artist = new Artist
+        {
+            Name = "上原ひろみ",
+            SortName = "Uehara, Hiromi",
+            Metadata = new ArtistMetadata
+            {
+                Name = "上原ひろみ",
+                Aliases = ["Hiromi"]
+            }
+        };
+
+        var names = ArtistIdentityResolver.GetNames(artist);
+
+        Assert.Contains("上原ひろみ", names);
+        Assert.Contains("Uehara, Hiromi", names);
+        Assert.Contains("Hiromi", names);
     }
 
     [Fact]

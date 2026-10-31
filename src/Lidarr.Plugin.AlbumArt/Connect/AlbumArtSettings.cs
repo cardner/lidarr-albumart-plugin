@@ -26,6 +26,7 @@ public sealed class AlbumArtSettings : IProviderConfig
         UseCoverArtArchive = true;
         DiscogsToken = string.Empty;
         DiscogsReleaseOverrides = string.Empty;
+        ArtistPathMappings = string.Empty;
     }
 
     [FieldDefinition(0, Label = "Max dimension (px)", Type = FieldType.Number, HelpText = "Maximum width or height. Defaults to 1400.")]
@@ -76,6 +77,9 @@ public sealed class AlbumArtSettings : IProviderConfig
     [FieldDefinition(15, Label = "Discogs release overrides", Type = FieldType.Textbox, Advanced = true, HelpText = "Optional exact mappings in LidarrAlbumId=DiscogsReleaseId form, separated by lines or commas.")]
     public string DiscogsReleaseOverrides { get; set; }
 
+    [FieldDefinition(16, Label = "Artist path mappings", Type = FieldType.Textbox, Advanced = true, HelpText = "Optional one-per-line mappings in LidarrArtistName=FolderName or LidarrArtistName=/absolute/path form.")]
+    public string ArtistPathMappings { get; set; }
+
     public CoverArtOptions ToOptions()
     {
         return new CoverArtOptions(
@@ -92,7 +96,8 @@ public sealed class AlbumArtSettings : IProviderConfig
             UseCoverArtArchive,
             UseDiscogs,
             DiscogsToken,
-            DiscogsReleaseOverrides);
+            DiscogsReleaseOverrides,
+            ArtistPathMappings);
     }
 
     public NzbDroneValidationResult Validate()

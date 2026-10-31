@@ -3,6 +3,8 @@ namespace NzbDrone.Core.Plugins.AlbumArt.Services;
 public interface ICoverArtFinder
 {
     string? Find(string directory, ArtworkProfile profile);
+
+    IReadOnlyList<string> FindAll(string directory, ArtworkProfile profile);
 }
 
 public sealed class CoverArtFinder : ICoverArtFinder
@@ -11,11 +13,16 @@ public sealed class CoverArtFinder : ICoverArtFinder
 
     public string? Find(string directory, ArtworkProfile profile)
     {
+        return FindAll(directory, profile).FirstOrDefault();
+    }
+
+    public IReadOnlyList<string> FindAll(string directory, ArtworkProfile profile)
+    {
         ArgumentNullException.ThrowIfNull(profile);
 
         if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
         {
-            return null;
+            return [];
         }
 
         var candidates = Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly)
@@ -30,9 +37,9 @@ public sealed class CoverArtFinder : ICoverArtFinder
             .OrderBy(candidate => candidate.NameRank)
             .ThenBy(candidate => candidate.ExtensionRank)
             .ThenBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
+            .ToList();
 
-        return candidates?.Path;
+        return candidates.Select(candidate => candidate.Path).ToList();
     }
 
     private static bool IsSupported(string path)

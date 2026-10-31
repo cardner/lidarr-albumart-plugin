@@ -32,7 +32,10 @@ jobs:
               Lidarr/Lidarr.Core.dll \
               Lidarr/Lidarr.Common.dll \
               Lidarr/NLog.dll \
-              Lidarr/FluentValidation.dll
+              Lidarr/FluentValidation.dll \
+              Lidarr/TagLibSharp.dll \
+              Lidarr/Equ.dll \
+              Lidarr/System.IO.Abstractions.dll
 
       - name: Resolve version
         id: version
@@ -77,6 +80,7 @@ jobs:
             --exclude 'Lidarr.Core.dll' \
             --exclude 'NLog.dll' \
             --exclude 'FluentValidation.dll' \
+            --exclude 'TagLibSharp.dll' \
             "$output/" "$staging/"
           test -f "$staging/Lidarr.Plugin.AlbumArt.dll"
           (cd "$staging" && zip -r "$asset" .)

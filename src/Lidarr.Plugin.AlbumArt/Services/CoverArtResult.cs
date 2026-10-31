@@ -9,6 +9,14 @@ public enum CoverArtOutcome
     Failed
 }
 
+public enum ArtworkSourceKind
+{
+    Sidecar,
+    Lidarr,
+    Embedded,
+    CoverArtArchive
+}
+
 public sealed record CoverArtResult(
     CoverArtOutcome Outcome,
     string? SourcePath = null,
@@ -19,4 +27,5 @@ public sealed record CoverArtResult(
     int OutputHeight = 0,
     long OriginalBytes = 0,
     long OutputBytes = 0,
-    string? Error = null);
+    string? Error = null,
+    ArtworkSourceKind? SourceKind = null);

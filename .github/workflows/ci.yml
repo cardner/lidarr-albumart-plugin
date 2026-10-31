@@ -32,7 +32,10 @@ jobs:
               Lidarr/Lidarr.Core.dll \
               Lidarr/Lidarr.Common.dll \
               Lidarr/NLog.dll \
-              Lidarr/FluentValidation.dll
+              Lidarr/FluentValidation.dll \
+              Lidarr/TagLibSharp.dll \
+              Lidarr/Equ.dll \
+              Lidarr/System.IO.Abstractions.dll
 
       - name: Restore
         run: dotnet restore AlbumArt.sln

@@ -34,5 +34,9 @@
       <HintPath>../../local/lidarr-ref/FluentValidation.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="TagLibSharp">
+      <HintPath>../../local/lidarr-ref/TagLibSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 </Project>

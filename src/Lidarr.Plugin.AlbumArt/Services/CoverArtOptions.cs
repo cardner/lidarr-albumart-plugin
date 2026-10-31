@@ -7,4 +7,8 @@ public sealed record CoverArtOptions(
     bool RemoveRedundantSidecars = true,
     bool ConvertToJpeg = true,
     bool OnlyShrink = true,
-    bool DryRun = false);
+    bool DryRun = false,
+    bool CreateMissingCover = true,
+    bool UseLidarrArtwork = true,
+    bool ExtractEmbeddedArtwork = true,
+    bool UseCoverArtArchive = true);

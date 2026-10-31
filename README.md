@@ -18,6 +18,7 @@ album folders before external providers.
 - Applies EXIF orientation and uses a white background when converting transparent artwork to JPEG
 - Preserves aspect ratio and never upscales by default
 - Converts PNG and WebP sidecars to JPEG
+- Creates missing `cover.jpg` files from Lidarr artwork, embedded front covers, or the MusicBrainz Cover Art Archive
 - Uses an atomic temporary-file replacement
 - Can remove the source `folder.*` or `front.*` after a successful write
 - Optimizes `artist.*` in artist roots and Navidrome's `album/artist.*` fallback
@@ -61,10 +62,46 @@ restoring that backup.
 | Only shrink | On | Never enlarges small artwork |
 | Scan interval | 1440 minutes | Existing-library scan frequency |
 | Optimize artist images | On | Processes `artist.*` in artist roots and album folders |
+| Create missing album covers | On | Runs the fallback lookup when no supported sidecar exists |
+| Use Lidarr artwork | On | Uses Lidarr's matching cached album cover first |
+| Extract embedded artwork | On | Extracts the front cover from an imported audio track |
+| Use Cover Art Archive | On | Looks up the monitored MusicBrainz release, then its release group |
 | Dry run | Off | Logs intended changes without writing or deleting |
 
 The scheduled scan uses the first Album Art Optimizer connection's processing
 settings. Its Metadata entry supplies the scan interval.
+
+## Missing artwork lookup
+
+When an album folder has no `cover.*`, `folder.*`, or `front.*` sidecar, the
+plugin uses this order:
+
+1. Lidarr's cached cover for the matching album.
+2. Front-cover artwork embedded in an album track.
+3. Cover Art Archive artwork for the monitored MusicBrainz release.
+4. Cover Art Archive artwork for the MusicBrainz release group.
+
+Every fallback image passes through the normal compatibility pipeline. The
+result is an EXIF-corrected `cover.jpg` with the configured maximum dimension
+and JPEG quality; transparent pixels are flattened onto white. Original
+fallback files and embedded tags are not modified.
+
+Cover Art Archive lookup sends the MusicBrainz identifier already selected by
+Lidarr. A missing response is treated as a normal lookup miss. Downloads are
+limited to 32 MB and time out after 20 seconds.
+
+If every source fails, the plugin skips the album and applies the
+`missing-album-artwork` tag to its artist. A full scan removes the tag after all
+of that artist's albums have resolvable artwork. No generic placeholder is
+created.
+
+To trigger lookup manually:
+
+1. Add **Album Art Optimizer Scan** under **Settings → Metadata**.
+2. Open **System → Tasks**.
+3. Run **Album Art Scan**.
+
+The completion message reports source counts and unresolved album titles.
 
 ## Navidrome
 
@@ -115,6 +152,9 @@ Lidarr.Core.dll
 Lidarr.Common.dll
 NLog.dll
 FluentValidation.dll
+TagLibSharp.dll
+Equ.dll
+System.IO.Abstractions.dll
 ```
 
 Then run:

@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
       <PrivateAssets>all</PrivateAssets>
@@ -18,5 +19,26 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Lidarr.Plugin.AlbumArt/Lidarr.Plugin.AlbumArt.csproj" />
+    <Reference Include="TagLibSharp">
+      <HintPath>../../local/lidarr-ref/TagLibSharp.dll</HintPath>
+    </Reference>
+    <Reference Include="Lidarr.Core">
+      <HintPath>../../local/lidarr-ref/Lidarr.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="Lidarr.Common">
+      <HintPath>../../local/lidarr-ref/Lidarr.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="NLog">
+      <HintPath>../../local/lidarr-ref/NLog.dll</HintPath>
+    </Reference>
+    <Reference Include="FluentValidation">
+      <HintPath>../../local/lidarr-ref/FluentValidation.dll</HintPath>
+    </Reference>
+    <Reference Include="Equ">
+      <HintPath>../../local/lidarr-ref/Equ.dll</HintPath>
+    </Reference>
+    <Reference Include="System.IO.Abstractions">
+      <HintPath>../../local/lidarr-ref/System.IO.Abstractions.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>

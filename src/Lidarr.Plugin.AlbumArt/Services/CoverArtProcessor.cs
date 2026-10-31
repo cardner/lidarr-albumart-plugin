@@ -5,6 +5,27 @@ namespace NzbDrone.Core.Plugins.AlbumArt.Services;
 public interface ICoverArtProcessor
 {
     CoverArtResult Process(string directory, CoverArtOptions options, ArtworkProfile profile);
+
+    CoverArtResult ProcessSource(
+        string sourcePath,
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile,
+        ArtworkSourceKind sourceKind);
+
+    CoverArtResult ProcessSidecar(
+        string sourcePath,
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile);
+
+    CoverArtResult ProcessData(
+        byte[] sourceData,
+        string sourceDescription,
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile,
+        ArtworkSourceKind sourceKind);
 }
 
 public sealed class CoverArtProcessor : ICoverArtProcessor
@@ -35,7 +56,13 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
 
         try
         {
-            return ProcessFile(sourcePath, directory, options, profile);
+            return ProcessFile(
+                sourcePath,
+                directory,
+                options,
+                profile,
+                ArtworkSourceKind.Sidecar,
+                options.RemoveRedundantSidecars);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -46,20 +73,147 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
         }
     }
 
-    private static CoverArtResult ProcessFile(
+    public CoverArtResult ProcessSource(
+        string sourcePath,
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile,
+        ArtworkSourceKind sourceKind)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        try
+        {
+            return ProcessFile(
+                sourcePath,
+                directory,
+                options with { NormalizeToJpeg = true, ConvertToJpeg = true },
+                profile,
+                sourceKind,
+                false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return new CoverArtResult(
+                CoverArtOutcome.Failed,
+                SourcePath: sourcePath,
+                Error: exception.Message,
+                SourceKind: sourceKind);
+        }
+    }
+
+    public CoverArtResult ProcessSidecar(
         string sourcePath,
         string directory,
         CoverArtOptions options,
         ArtworkProfile profile)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        try
+        {
+            return ProcessFile(
+                sourcePath,
+                directory,
+                options,
+                profile,
+                ArtworkSourceKind.Sidecar,
+                options.RemoveRedundantSidecars);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return new CoverArtResult(
+                CoverArtOutcome.Failed,
+                SourcePath: sourcePath,
+                Error: exception.Message,
+                SourceKind: ArtworkSourceKind.Sidecar);
+        }
+    }
+
+    public CoverArtResult ProcessData(
+        byte[] sourceData,
+        string sourceDescription,
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile,
+        ArtworkSourceKind sourceKind)
+    {
+        ArgumentNullException.ThrowIfNull(sourceData);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceDescription);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(profile);
+
+        try
+        {
+            using var stream = new MemoryStream(sourceData, false);
+            using var codec = SKCodec.Create(stream)
+                              ?? throw new ArgumentException($"Unsupported or invalid image '{sourceDescription}'.");
+            using var image = SKBitmap.Decode(codec)
+                              ?? throw new ArgumentException($"Could not decode image '{sourceDescription}'.");
+            return ProcessDecodedImage(
+                image,
+                codec.EncodedOrigin,
+                sourceDescription,
+                sourceData.LongLength,
+                directory,
+                options with { NormalizeToJpeg = true, ConvertToJpeg = true },
+                profile,
+                sourceKind,
+                false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return new CoverArtResult(
+                CoverArtOutcome.Failed,
+                SourcePath: sourceDescription,
+                Error: exception.Message,
+                SourceKind: sourceKind);
+        }
+    }
+
+    private static CoverArtResult ProcessFile(
+        string sourcePath,
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile,
+        ArtworkSourceKind sourceKind,
+        bool deleteSourceAfterSuccess)
+    {
         Validate(options);
 
         using var image = DecodeImage(sourcePath, out var encodedOrigin);
+        return ProcessDecodedImage(
+            image,
+            encodedOrigin,
+            sourcePath,
+            new FileInfo(sourcePath).Length,
+            directory,
+            options,
+            profile,
+            sourceKind,
+            deleteSourceAfterSuccess);
+    }
+
+    private static CoverArtResult ProcessDecodedImage(
+        SKBitmap image,
+        SKEncodedOrigin encodedOrigin,
+        string sourcePath,
+        long originalBytes,
+        string directory,
+        CoverArtOptions options,
+        ArtworkProfile profile,
+        ArtworkSourceKind sourceKind,
+        bool deleteSourceAfterSuccess)
+    {
+        Validate(options);
         var orientedSize = GetOrientedSize(image.Width, image.Height, encodedOrigin);
 
         var originalWidth = orientedSize.Width;
         var originalHeight = orientedSize.Height;
-        var originalBytes = new FileInfo(sourcePath).Length;
         var destinationPath = GetDestinationPath(sourcePath, directory, options, profile);
         var requiresResize = Math.Max(originalWidth, originalHeight) > options.MaxDimension;
         var requiresConversion = options.ConvertToJpeg &&
@@ -80,7 +234,8 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
                 originalWidth,
                 originalHeight,
                 originalBytes,
-                originalBytes);
+                originalBytes,
+                SourceKind: sourceKind);
         }
 
         var outputSize = CalculateOutputSize(originalWidth, originalHeight, options);
@@ -94,12 +249,13 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
                 originalHeight,
                 outputSize.Width,
                 outputSize.Height,
-                originalBytes);
+                originalBytes,
+                SourceKind: sourceKind);
         }
 
         WriteAtomically(image, encodedOrigin, outputSize, destinationPath, options.JpegQuality);
 
-        if (options.RemoveRedundantSidecars && !PathsEqual(sourcePath, destinationPath))
+        if (deleteSourceAfterSuccess && !PathsEqual(sourcePath, destinationPath))
         {
             File.Delete(sourcePath);
         }
@@ -113,7 +269,8 @@ public sealed class CoverArtProcessor : ICoverArtProcessor
             outputSize.Width,
             outputSize.Height,
             originalBytes,
-            new FileInfo(destinationPath).Length);
+            new FileInfo(destinationPath).Length,
+            SourceKind: sourceKind);
     }
 
     private static string GetDestinationPath(
